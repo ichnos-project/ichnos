@@ -1,0 +1,25 @@
+# Build output
+/bin/
+/dist/
+
+# Test output
+*.test
+coverage.out
+
+# Local environment files, which may hold tokens
+.env
+.env.*
+
+# Local research notes, not part of the project
+/research/
+
+# Personal AI agent setup: local settings, notes, and agents or skills named local-*
+.claude/settings.local.json
+.claude/agents/local-*.md
+.claude/skills/local-*/
+CLAUDE.local.md
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store

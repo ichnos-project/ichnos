@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/ichnos-project/ichnos/discussions
+    about: Ask questions and discuss ideas in GitHub Discussions.
+  - name: Report a security vulnerability
+    url: https://github.com/ichnos-project/ichnos/security/advisories/new
+    about: Report vulnerabilities privately. Do not open a public issue.

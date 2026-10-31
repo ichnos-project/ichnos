@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "permissions": {
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git * push *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr edit *)",
+      "Bash(gh pr ready *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh pr close *)",
+      "Bash(gh pr reopen *)",
+      "Bash(gh pr comment *)",
+      "Bash(gh pr review *)",
+      "Bash(gh issue create *)",
+      "Bash(gh issue edit *)",
+      "Bash(gh issue close *)",
+      "Bash(gh issue reopen *)",
+      "Bash(gh issue comment *)",
+      "Bash(gh release *)",
+      "Bash(gh workflow run *)",
+      "Bash(gh repo edit *)",
+      "Bash(gh api * -X *)",
+      "Bash(gh api * --method *)",
+      "Bash(gh api * -f *)",
+      "Bash(gh api * -F *)",
+      "Bash(gh api * --field *)",
+      "Bash(gh api * --raw-field *)",
+      "Bash(gh api * --input *)",
+      "Bash(gh api -X*)",
+      "Bash(gh api --method*)",
+      "Bash(gh api * -X*)",
+      "Bash(gh api * --method=*)",
+      "Bash(gh repo create *)",
+      "Bash(gh repo delete *)",
+      "Bash(gh repo sync *)",
+      "Bash(gh secret *)",
+      "Bash(gh variable *)",
+      "Bash(gh gist create *)",
+      "Bash(gh label *)",
+      "Bash(gh pr update-branch *)",
+      "Bash(gh run cancel *)",
+      "Bash(gh run rerun *)",
+      "Bash(gh run delete *)",
+      "Bash(gh workflow enable *)",
+      "Bash(gh workflow disable *)",
+      "Bash(gh cache delete *)",
+      "Bash(gh issue delete *)",
+      "Bash(gh issue transfer *)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Edit(/artwork/**)",
+      "Edit(/docs/images/banner-*.svg)",
+      "Edit(/CHANGELOG.md)",
+      "Edit(/schemas/**)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "go build -C \"$CLAUDE_PROJECT_DIR/hack/tools\" -o \"$CLAUDE_PROJECT_DIR/bin/claude-hook.$$\" ./cmd/claude-hook 1>&2 && mv -f \"$CLAUDE_PROJECT_DIR/bin/claude-hook.$$\" \"$CLAUDE_PROJECT_DIR/bin/claude-hook\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/bin/claude-hook\""
+          }
+        ]
+      }
+    ]
+  }
+}

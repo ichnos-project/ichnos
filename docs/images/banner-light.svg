@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-label="Ichnos: explains why your container build cache missed">
+<title>Ichnos: explains why your container build cache missed</title>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F2FBFA"/>
+    <stop offset="1" stop-color="#FFFFFF"/>
+  </linearGradient>
+</defs>
+<rect x="0.5" y="0.5" width="1279" height="319" rx="24" fill="url(#bg)" stroke="#D7EEEC"/>
+<g transform="rotate(-18 62 146)"><g transform="translate(44.00 128.00) scale(0.3)" opacity="0.16">
+  <g fill="none" stroke-linecap="round" stroke-width="15">
+    <line x1="44" y1="63" x2="25" y2="35" stroke="#0E9F96"/>
+    <line x1="60" y1="55" x2="60" y2="17" stroke="#0E9F96"/>
+    <line x1="76" y1="63" x2="95" y2="35" stroke="#0E9F96"/>
+  </g>
+  <ellipse cx="60" cy="88" rx="18" ry="15" fill="#0E9F96"/>
+</g></g>
+<g transform="rotate(10 128 110)"><g transform="translate(110.00 92.00) scale(0.3)" opacity="0.16">
+  <g fill="none" stroke-linecap="round" stroke-width="15">
+    <line x1="44" y1="63" x2="25" y2="35" stroke="#0E9F96"/>
+    <line x1="60" y1="55" x2="60" y2="17" stroke="#0E9F96"/>
+    <line x1="76" y1="63" x2="95" y2="35" stroke="#0E9F96"/>
+  </g>
+  <ellipse cx="60" cy="88" rx="18" ry="15" fill="#0E9F96"/>
+</g></g>
+<g transform="rotate(-14 196 136)"><g transform="translate(178.00 118.00) scale(0.3)" opacity="0.16">
+  <g fill="none" stroke-linecap="round" stroke-width="15">
+    <line x1="44" y1="63" x2="25" y2="35" stroke="#0E9F96"/>
+    <line x1="60" y1="55" x2="60" y2="17" stroke="#0E9F96"/>
+    <line x1="76" y1="63" x2="95" y2="35" stroke="#0E9F96"/>
+  </g>
+  <ellipse cx="60" cy="88" rx="18" ry="15" fill="#0E9F96"/>
+</g></g>
+<g transform="rotate(12 264 92)"><g transform="translate(246.00 74.00) scale(0.3)" opacity="0.16">
+  <g fill="none" stroke-linecap="round" stroke-width="15">
+    <line x1="44" y1="63" x2="25" y2="35" stroke="#0E9F96"/>
+    <line x1="60" y1="55" x2="60" y2="17" stroke="#0E9F96"/>
+    <line x1="76" y1="63" x2="95" y2="35" stroke="#0E9F96"/>
+  </g>
+  <ellipse cx="60" cy="88" rx="18" ry="15" fill="#0E9F96"/>
+</g></g>
+<g transform="rotate(-10 334 118)"><g transform="translate(316.00 100.00) scale(0.3)" opacity="0.16">
+  <g fill="none" stroke-linecap="round" stroke-width="15">
+    <line x1="44" y1="63" x2="25" y2="35" stroke="#0E9F96"/>
+    <line x1="60" y1="55" x2="60" y2="17" stroke="#F59E0B"/>
+    <line x1="76" y1="63" x2="95" y2="35" stroke="#0E9F96"/>
+  </g>
+  <ellipse cx="60" cy="88" rx="18" ry="15" fill="#0E9F96"/>
+</g></g>
+<g transform="translate(424.50 40.00) scale(1.0)">
+  <g fill="none" stroke-linecap="round" stroke-width="15">
+    <line x1="44" y1="63" x2="25" y2="35" stroke="#0E9F96"/>
+    <line x1="60" y1="55" x2="60" y2="17" stroke="#F59E0B"/>
+    <line x1="76" y1="63" x2="95" y2="35" stroke="#0E9F96"/>
+  </g>
+  <ellipse cx="60" cy="88" rx="18" ry="15" fill="#0E9F96"/>
+</g>
+<g transform="translate(570.50 40.00) scale(1.0)" fill="none" stroke="#0B1F33" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+  <line x1="8" y1="57" x2="8" y2="95"/>
+  <circle cx="8" cy="37" r="6.5" fill="#0B1F33" stroke="none"/>
+  <path d="M61.32 61.14 A20 20 0 1 0 61.32 88.86"/>
+  <line x1="82" y1="17" x2="82" y2="95"/>
+  <path d="M82 72.5 A17.5 17.5 0 0 1 117 72.5 V95"/>
+  <line x1="138" y1="57" x2="138" y2="95"/>
+  <path d="M138 72.5 A17.5 17.5 0 0 1 173 72.5 V95"/>
+  <circle cx="214" cy="75" r="20"/>
+  <path d="M276.26 60 A13 10 0 1 0 265 75 A13 10 0 1 1 253.74 90"/>
+</g>
+<text x="640" y="232" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="28" font-weight="600" fill="#1F2D3A">Explains why your container build cache missed, on every pull request.</text>
+<text x="640" y="272" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" fill="#57606A">Open source · CI-agnostic · Built on BuildKit build records</text>
+</svg>

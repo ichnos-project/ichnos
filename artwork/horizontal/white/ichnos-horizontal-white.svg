@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 443 128" width="443" height="128" role="img" aria-label="Ichnos">
+<title>Ichnos</title>
+<g transform="translate(4.00 4.00) scale(1.0)">
+  <g fill="none" stroke-linecap="round" stroke-width="15">
+    <line x1="44" y1="63" x2="25" y2="35" stroke="#FFFFFF"/>
+    <line x1="60" y1="55" x2="60" y2="17" stroke="#FFFFFF"/>
+    <line x1="76" y1="63" x2="95" y2="35" stroke="#FFFFFF"/>
+  </g>
+  <ellipse cx="60" cy="88" rx="18" ry="15" fill="#FFFFFF"/>
+</g><g transform="translate(150.00 4.00) scale(1.0)" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+  <line x1="8" y1="57" x2="8" y2="95"/>
+  <circle cx="8" cy="37" r="6.5" fill="#FFFFFF" stroke="none"/>
+  <path d="M61.32 61.14 A20 20 0 1 0 61.32 88.86"/>
+  <line x1="82" y1="17" x2="82" y2="95"/>
+  <path d="M82 72.5 A17.5 17.5 0 0 1 117 72.5 V95"/>
+  <line x1="138" y1="57" x2="138" y2="95"/>
+  <path d="M138 72.5 A17.5 17.5 0 0 1 173 72.5 V95"/>
+  <circle cx="214" cy="75" r="20"/>
+  <path d="M276.26 60 A13 10 0 1 0 265 75 A13 10 0 1 1 253.74 90"/>
+</g>
+</svg>

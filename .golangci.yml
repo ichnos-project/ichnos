@@ -1,0 +1,132 @@
+version: "2"
+
+run:
+  modules-download-mode: readonly
+
+linters:
+  default: standard
+  enable:
+    - bidichk
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - depguard
+    - dupword
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - forbidigo
+    - forcetypeassert
+    - gocheckcompilerdirectives
+    - gochecknoglobals
+    - gochecknoinits
+    - gocritic
+    - godot
+    - godox
+    - gosec
+    - misspell
+    - modernize
+    - musttag
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - noctx
+    - nolintlint
+    - revive
+    - sloglint
+    - thelper
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - usetesting
+    - wrapcheck
+  settings:
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: github.com/pkg/errors
+              desc: use errors and fmt.Errorf with %w
+            - pkg: math/rand$
+              desc: use math/rand/v2, or crypto/rand for anything secret
+        flags:
+          files:
+            - $all
+            - "!**/internal/cli/**"
+            - "!**/cmd/**"
+          deny:
+            - pkg: flag
+              desc: define flags only in internal/cli
+            - pkg: github.com/spf13/pflag
+              desc: define flags only in internal/cli
+    forbidigo:
+      forbid:
+        - pattern: ^(fmt\.Print.*|print|println)$
+          msg: write to an injected io.Writer
+        - pattern: ^panic$
+          msg: return an error; Ichnos code never panics
+        - pattern: ^log\.
+          msg: use the *slog.Logger from engine.Settings
+        - pattern: ^os\.(Stdout|Stderr)$
+          msg: write to an injected io.Writer; only main opens the standard streams
+        - pattern: ^otel\.(Tracer|Meter|GetTracerProvider|GetMeterProvider|SetTracerProvider|SetMeterProvider)$
+          msg: take tracers and meters from engine.Settings
+    gocritic:
+      enabled-checks:
+        - commentedOutCode
+        - docStub
+      settings:
+        commentedOutCode:
+          minLength: 8
+    godot:
+      scope: declarations
+    godox:
+      keywords:
+        - TODO
+        - FIXME
+        - HACK
+        - XXX
+        - BUG
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    sloglint:
+      kv-only: true
+      context: scope
+    wrapcheck:
+      ignore-package-globs:
+        - github.com/ichnos-project/ichnos/*
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+  exclusions:
+    generated: strict
+    presets:
+      - std-error-handling
+    rules:
+      - path: (^|/)cmd/[^/]+/main\.go$
+        linters:
+          - forbidigo
+        text: os\.(Stdout|Stderr)
+    warn-unused: true
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/ichnos-project/ichnos
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
