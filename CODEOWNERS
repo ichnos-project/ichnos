@@ -1,13 +1,2 @@
 # CODEOWNERS must match the roles in MAINTAINERS.md and GOVERNANCE.md.
-# Reviewers are added for the areas they own, as described in CONTRIBUTOR_LADDER.md.
-# The last matching pattern takes precedence.
-
-# Default owners for everything in the repository.
 * @RayanAlyasi
-
-# Governance, security policy and release workflows need a maintainer's approval.
-/GOVERNANCE.md     @RayanAlyasi
-/MAINTAINERS.md    @RayanAlyasi
-/SECURITY.md       @RayanAlyasi
-/CODEOWNERS        @RayanAlyasi
-/.github/workflows/ @RayanAlyasi

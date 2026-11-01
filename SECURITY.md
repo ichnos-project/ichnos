@@ -15,9 +15,9 @@ Please include in your report:
 
 ## Response Timeline
 
-The Ichnos security team will acknowledge receipt of your report within **5 business days** and will provide an estimated timeline for a fix within **10 business days**.
+The maintainers will acknowledge receipt of your report within **5 business days** and will provide an estimated timeline for a fix within **10 business days**.
 
-The team will keep you informed of progress toward a fix and may ask for additional information. We aim to release a fix for vulnerabilities of medium or higher severity within 60 days.
+The maintainers will keep you informed of progress toward a fix and may ask for additional information. We aim to release a fix for vulnerabilities of medium or higher severity within 60 days.
 
 ## Supported Versions
 
@@ -30,18 +30,16 @@ Ichnos has not reached v1.0. Until then, only the latest release receives securi
 
 ## Disclosure Policy
 
-When a security issue is confirmed, the Ichnos team will:
+When a security issue is confirmed, the maintainers will:
 
 1. Develop and test a fix
 2. Assign a CVE identifier if appropriate
 3. Release a patched version
 4. Publish a security advisory via [GitHub Security Advisories](https://github.com/ichnos-project/ichnos/security/advisories)
 
-## Security Response Team
+## Who Handles Reports
 
-The security response team handles all reports of security vulnerabilities according to this policy. See [GOVERNANCE.md](GOVERNANCE.md) for how the security response team is appointed and maintained.
-
-Current security response team members are listed in [MAINTAINERS.md](MAINTAINERS.md).
+Reports are handled by the maintainers listed in [MAINTAINERS.md](MAINTAINERS.md).
 
 ## Security Best Practices
 
