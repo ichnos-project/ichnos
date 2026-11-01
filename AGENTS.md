@@ -37,13 +37,14 @@ Ichnos explains why a container build missed its cache, by comparing a pull requ
 
 ## Comments
 
-A comment explains what the code cannot say for itself. Write one only for:
+A comment explains what the code cannot say for itself. Never add one that is not needed: if deleting it would lose nothing a reader needs, because the code, the commit message or a rule in this repository already says it, leave it out. Write one only for:
 
 * a doc comment on every package and exported identifier, which Go requires, telling callers what the signature does not;
-* a reason the code does not show: a workaround with its upstream issue link, a security constraint, an invariant or a deliberate trade-off;
+* a comment on unexported code whose behavior is not obvious;
+* the reason behind code that would otherwise look wrong: a workaround with its upstream issue link, a security constraint, an invariant or a deliberate trade-off;
 * a `//nolint:linter // reason` directive.
 
-The diff and the commit message record what changed. When you edit, delete or move code, update or delete the comments it makes wrong, and add none that describe the edit: nothing like "removed", "replaced with", "now uses", "previously" or "moved from", and no commented-out code. The full rule is in [Comments](docs/coding-conventions.md#comments). Linters catch TODO notes and commented-out code in Go; reviewers check the rest.
+The diff and the commit message record what changed. When you edit, delete or move code, update or delete the comments it makes wrong, and add none that describe the edit: nothing like "removed", "replaced with", "now uses", "previously" or "moved from", and no commented-out code. When a review flags a comment, ask first whether it should exist, not how to reword it. The full rule is in [Comments](docs/coding-conventions.md#comments). Linters catch TODO notes and commented-out code in Go; reviewers check the rest.
 
 ## Reviewing
 
