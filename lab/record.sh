@@ -16,19 +16,19 @@ mkdir "$work"
 trap 'rm -rf "$work"' EXIT
 
 fixture() {
-  local dir=$1 image=$2 wc_flag=$3 app_text=$4
+  local dir=$1 image=$2 wc_flag=$3 app_text=$4 inserted=$5 appended=$6
 
   mkdir -p "$dir"
   printf 'level=info\n' >"$dir/config.txt"
   printf '%s\n' "$app_text" >"$dir/app.txt"
-  cat >"$dir/Dockerfile" <<EOF
-FROM $image
-WORKDIR /app
-COPY config.txt .
-RUN wc $wc_flag config.txt > size.txt
-COPY app.txt .
-RUN cat config.txt app.txt > bundle.txt
-EOF
+  printf 'extra\n' >"$dir/extra.txt"
+  {
+    printf 'FROM %s\nWORKDIR /app\n' "$image"
+    [ -z "$inserted" ] || printf '%s\n' "$inserted"
+    printf 'COPY config.txt .\nRUN wc %s config.txt > size.txt\n' "$wc_flag"
+    printf 'COPY app.txt .\nRUN cat config.txt app.txt > bundle.txt\n'
+    [ -z "$appended" ] || printf '%s\n' "$appended"
+  } >"$dir/Dockerfile"
 }
 
 check_record() {
@@ -65,9 +65,15 @@ record() {
 
 scenario() {
   local name=$1 pr_image=$2 pr_wc_flag=$3 pr_app_text=$4 cache_import=$5
+  local pr_inserted=${6:-} pr_appended=${7:-}
 
-  fixture "$work/$name/base" "$alpine_3_22" -c one
-  fixture "$work/$name/pr" "$pr_image" "$pr_wc_flag" "$pr_app_text"
+  fixture "$work/$name/base" "$alpine_3_22" -c one '' ''
+  fixture "$work/$name/pr" "$pr_image" "$pr_wc_flag" "$pr_app_text" "$pr_inserted" "$pr_appended"
+  record_pair "$name" "$cache_import"
+}
+
+record_pair() {
+  local name=$1 cache_import=$2
 
   record "$name" base --cache-to type=local,dest=../cache,mode=max
   if [ "$cache_import" = yes ]; then
@@ -88,6 +94,14 @@ scenario changed-instruction "$alpine_3_22" -l one yes
 scenario changed-copy-file "$alpine_3_22" -c two yes
 scenario changed-base-image "$alpine_3_21" -c one yes
 scenario no-cache-import "$alpine_3_22" -c one no
+scenario added-step "$alpine_3_22" -c one yes 'RUN echo ready > ready.txt'
+scenario added-copy "$alpine_3_22" -c two yes '' 'COPY extra.txt .'
+
+fixture "$work/changed-dockerignore/base" "$alpine_3_22" -c one '' 'COPY . all/'
+fixture "$work/changed-dockerignore/pr" "$alpine_3_22" -c one '' 'COPY . all/'
+printf '.dockerignore\nunused.txt\n' >"$work/changed-dockerignore/base/.dockerignore"
+printf '.dockerignore\nextra.txt\n' >"$work/changed-dockerignore/pr/.dockerignore"
+record_pair changed-dockerignore yes
 
 rm -rf "$out"
 mkdir -p "$(dirname "$out")"
