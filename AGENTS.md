@@ -40,6 +40,7 @@ Ichnos explains why a container build missed its cache, by comparing a pull requ
 A comment explains what the code cannot say for itself. Never add one that is not needed: if deleting it would lose nothing a reader needs, because the code, the commit message or a rule in this repository already says it, leave it out. Write one only for:
 
 * a doc comment on every package and exported identifier, which Go requires, telling callers what the signature does not;
+* a comment on unexported code whose behavior is not obvious;
 * the reason behind code that would otherwise look wrong: a workaround with its upstream issue link, a security constraint, an invariant or a deliberate trade-off;
 * a `//nolint:linter // reason` directive.
 
