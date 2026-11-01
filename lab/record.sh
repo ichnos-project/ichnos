@@ -79,8 +79,9 @@ scenario() {
 }
 
 docker buildx create --name "$builder" --driver docker-container \
-  --driver-opt "image=$buildkit_image" --bootstrap unix:///var/run/docker.sock >/dev/null
+  --driver-opt "image=$buildkit_image" unix:///var/run/docker.sock >/dev/null
 trap 'docker buildx rm "$builder" >/dev/null 2>&1 || true; rm -rf "$work"' EXIT
+docker buildx inspect --bootstrap "$builder" >/dev/null
 
 scenario control "$alpine_3_22" -c one yes
 scenario changed-instruction "$alpine_3_22" -l one yes

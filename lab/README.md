@@ -24,13 +24,13 @@ Line 1, `FROM`, is left out of the table because it never reports a hit, even wh
 lab/record.sh
 ```
 
-This needs Docker with its socket at `/var/run/docker.sock`, and `jq`. It creates a temporary `ichnos-lab` builder and removes it afterwards, so it leaves other builders and their records alone. It replaces the records in `testdata/` only after every build has passed.
+This needs Docker with its socket at `/var/run/docker.sock`, and `jq`. It creates a temporary `ichnos-lab` builder and removes it afterward, so it leaves other builders and their records alone. It replaces the records in `testdata/` only after every build has passed.
 
 The records are public, and a record keeps the build folder and the Docker socket path. So the script builds in `/tmp/ichnos-lab` through the default socket, and it stops if a record contains the local user name, host name or macOS temporary path. Check new records by hand as well: fixtures must never use real credentials or private content.
 
 ## What the Records Show
 
-These facts come from records made with BuildKit v0.34.0 and buildx v0.28.0-desktop.1 for `linux/amd64`.
+These facts come from records made with BuildKit v0.34.0 and buildx v0.28.0-desktop.1 for `linux/amd64`. Update the versions here when you re-record.
 
 ### Format
 
