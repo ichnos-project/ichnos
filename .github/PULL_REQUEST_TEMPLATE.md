@@ -1,28 +1,25 @@
-## Description
+<!-- Thanks for contributing! Please read https://github.com/ichnos-project/ichnos/blob/main/CONTRIBUTING.md first. To report a vulnerability, follow SECURITY.md instead of opening a pull request. -->
 
-<!-- What does this PR do? Why is this change needed? -->
+## What this PR does and why
 
-## Related Issue
+## Related issue
 
-<!-- Link to the issue this PR addresses, e.g. Fixes #123 -->
+<!-- "Fixes #123" closes the issue on merge, and "Part of #123" leaves it open. Write "None" if a maintainer asked for this work without an issue. -->
 
-## Type of Change
+## How it was tested
 
-<!-- Check all that apply -->
+<!-- The commands you ran, and any real builds you tried. Remove tokens and credentials from anything you paste: build records can contain them. -->
 
-- [ ] Bug fix
-- [ ] New feature
-- [ ] New or changed audit rule
-- [ ] Documentation update
-- [ ] Refactoring
-- [ ] Other (describe):
+## AI usage
+
+<!-- Yes or No. If yes, briefly say how it was used. -->
 
 ## Checklist
 
-- [ ] I have read the [CONTRIBUTING](https://github.com/ichnos-project/ichnos/blob/main/CONTRIBUTING.md) guide
-- [ ] Tests pass locally
-- [ ] I have added tests that prove my fix or feature works
-- [ ] I have updated documentation as needed
-- [ ] This change does not introduce breaking changes
-- [ ] The PR title follows [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
-- [ ] My commits are signed off (`git commit -s`)
+<!-- Delete items that do not apply. -->
+
+- [ ] New behavior has tests, and a bug fix has a test that fails without it.
+- [ ] User-facing changes are documented.
+- [ ] A breaking change to the CLI, configuration, snapshot or report formats, or audit rules has `!` before the colon in its title.
+- [ ] Any change to how untrusted input or secrets are handled is explained above.
+- [ ] I understand this change and can explain it, whatever tools I used.

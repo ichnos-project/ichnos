@@ -9,7 +9,7 @@ disable-model-invocation: true
 2. Write the title as described in "Commits and Pull Requests" in AGENTS.md, with `!` before the colon for a breaking change and a scope that names the package or area. Check it with `hack/check-pr-title.sh "<title>"`.
 3. Add a body only when the reason is not obvious from the title. Wrap it at 72 characters, explain why rather than what, and end with `BREAKING CHANGE: <what users must do>` when needed.
 4. Commit with that message and no trailers.
-5. Fill in every section of .github/PULL_REQUEST_TEMPLATE.md: what changed and why, `Fixes #N`, the type of change, and only the checklist items that are true. Ask the user for anything you cannot verify, such as manual testing, and use their answer.
+5. Fill in every section of .github/PULL_REQUEST_TEMPLATE.md: what changed and why, the related issue, how it was tested, and how AI was used. The AI usage answer is always Yes, because this skill wrote the description; ask the user how AI was used for the rest. Delete the checklist items that do not apply, tick the others only when they are true, and leave "I understand this change" for the user to tick. Ask the user for anything you cannot verify, such as manual testing, and use their answer.
 6. Show the user the title and description, and give them the commands to sign off and push:
    ```
    git rebase --signoff main

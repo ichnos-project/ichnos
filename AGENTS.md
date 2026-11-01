@@ -69,5 +69,5 @@ Edit the source and regenerate instead of editing these by hand:
 
 * Title every pull request in [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) form, because the squash merge makes it the commit message: `type(scope): summary`, at most 72 characters, imperative, lowercase, no trailing period. For example, `feat(audit): add the git-dir-in-context rule`.
 * Add a commit body only when the reason is not obvious from the title, and explain why rather than what.
-* Never add `Signed-off-by`, `Co-authored-by` or tool attribution lines. Only the human author can certify the [DCO](CONTRIBUTING.md#sign-your-commits), and they sign off themselves.
+* Never add `Signed-off-by`, `Co-authored-by` or tool attribution lines in commits. Only the human author can certify the [DCO](CONTRIBUTING.md#sign-your-commits), and they sign off themselves.
 * Make one logical change per pull request, fill in every section of the [pull request template](.github/PULL_REQUEST_TEMPLATE.md), and update the documentation in the same pull request.
