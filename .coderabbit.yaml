@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+tone_instructions: "Be direct and concise. For each problem, give the scenario that triggers it and the fix. Leave out praise."
+
+reviews:
+  # With one maintainer, this is the only independent review a change gets.
+  profile: assertive
+  # The author writes the pull request description, so the summary stays out of it.
+  high_level_summary_in_walkthrough: true
+  in_progress_fortune: false
+  suggested_labels: false
+  suggested_reviewers: false
+
+  path_filters:
+    - "!CHANGELOG.md"
+    - "!**/testdata/fuzz/**"
+
+  # No linter can judge these, so the review has to.
+  path_instructions:
+    - path: "**/*.{go,py,sh,yml,yaml}"
+      instructions: |
+        Comments: flag any comment that describes the edit ("removed", "replaced with", "now uses", "previously", "moved from"), restates the code, or is addressed to a reviewer or an AI assistant. A comment should say what the code cannot: a reason, an invariant, or a workaround with its upstream link. Outside Go, also flag TODO, FIXME, HACK and XXX notes and commented-out code, which no linter catches there.
+
+  pre_merge_checks:
+    # CI checks the title's format, but only a review can judge what it claims.
+    title:
+      requirements: "The type and scope match the change, and a breaking change has `!` before the colon."
+    # revive already requires doc comments on exported Go identifiers.
+    docstrings:
+      mode: "off"
+
+  # Contributors make and sign their own changes, so CodeRabbit only comments.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+
+knowledge_base:
+  code_guidelines:
+    filePatterns:
+      - files: "docs/coding-conventions.md"
+        applyTo: "**/*.go"
+
+chat:
+  # The repository is public, so only members can direct the bot.
+  allow_non_org_members: false
