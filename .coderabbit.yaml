@@ -23,7 +23,7 @@ reviews:
   pre_merge_checks:
     # CI checks the title's format, but only a review can judge what it claims.
     title:
-      requirements: "The type and scope match the change, and a breaking change has `!` before the colon."
+      requirements: "The type and scope match the change, and the title has `!` before the colon if and only if the change is breaking."
     # revive already requires doc comments on exported Go identifiers.
     docstrings:
       mode: "off"
