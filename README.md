@@ -9,9 +9,6 @@
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <a href="ROADMAP.md"><img alt="Status: pre-alpha" src="https://img.shields.io/badge/status-pre--alpha-orange"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/ichnos-project/ichnos"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/ichnos-project/ichnos/badge"></a>
-  <!-- OpenSSF Best Practices: register the project at https://www.bestpractices.dev, then replace NNNN with its ID:
-  <a href="https://www.bestpractices.dev/projects/NNNN"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/NNNN/badge"></a> -->
-  <!-- Add when live: CI, Go Report Card, latest release. -->
 </p>
 
 # Ichnos
@@ -67,7 +64,7 @@ The [roadmap](ROADMAP.md) lists the planned releases, from an offline compare in
 ## Community
 
 - Ask questions and share ideas in [GitHub Discussions](https://github.com/ichnos-project/ichnos/discussions).
-- Report bugs and request features in [GitHub Issues](https://github.com/ichnos-project/ichnos/issues). See [SUPPORT.md](SUPPORT.md).
+- Report bugs and request features in [GitHub Issues](https://github.com/ichnos-project/ichnos/issues).
 - The project is run as described in [GOVERNANCE.md](GOVERNANCE.md); the maintainers are listed in [MAINTAINERS.md](MAINTAINERS.md).
 - If you use Ichnos, please add your organization to [ADOPTERS.md](ADOPTERS.md).
 

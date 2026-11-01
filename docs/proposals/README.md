@@ -16,6 +16,5 @@ Bug fixes, new audit rules and documentation changes do not need a proposal.
 
 1. Open an issue that describes the problem, and agree that it is worth solving.
 2. Copy [001-proposal-template.md](001-proposal-template.md) to `NNN-short-title.md` in this directory, using the next free number, and open a pull request.
-3. The proposal stays open for comments for at least one week.
-4. The proposal is accepted by lazy consensus of the Maintainers, as described in [GOVERNANCE.md](../../GOVERNANCE.md#voting). The outcome is recorded in the proposal's status, and the proposal is merged whatever the outcome.
-5. Implementation pull requests link to the proposal, and its status is updated when the work ships.
+3. The maintainers accept or reject the proposal. The outcome is recorded in the proposal's status, and the proposal is merged whatever the outcome.
+4. Implementation pull requests link to the proposal, and its status is updated when the work ships.

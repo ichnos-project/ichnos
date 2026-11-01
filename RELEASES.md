@@ -64,4 +64,4 @@ Releases are published as immutable GitHub releases.
 
 ## Release Roles
 
-Release management is handled by the project maintainers. See [GOVERNANCE.md](GOVERNANCE.md) for how release responsibilities are assigned.
+Release management is handled by the project maintainers.

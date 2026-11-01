@@ -12,5 +12,4 @@ Follow the process in [docs/proposals/README.md](../../../docs/proposals/README.
 3. Copy `docs/proposals/001-proposal-template.md` to `docs/proposals/NNN-short-title.md`, using a short kebab-case title.
 4. Fill in the header: the authors (ask the user for their name and GitHub ID), today's date as **Begin Design Discussion**, and **Status**: provisional.
 5. Fill in each section from what the user has told you. Leave a section's guidance text in place where you have no information, and list those sections for the user instead of inventing content.
-6. Link the issue under **Prior discussion and links**.
-7. Remind the user that the proposal stays open for comments for at least one week before a decision.
+6. Link the issue under **Background**.
