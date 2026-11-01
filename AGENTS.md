@@ -65,6 +65,7 @@ Edit the source and regenerate instead of editing these by hand:
 * `artwork/**` and `docs/images/banner-*.svg`: edit `hack/artwork/generate.py`, then run `python3 hack/artwork/generate.py`
 * `CHANGELOG.md`: generated from pull request titles at release time.
 * `schemas/**` (once added): generated from the Go types by `make generate`.
+* `testdata/buildkit-*/**`: recorded by `lab/record.sh`.
 
 ## Commits and Pull Requests
 
