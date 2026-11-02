@@ -291,8 +291,9 @@ gates:
 
 - Will Docker add a base-versus-pull-request comparison to its own build summary? If it does, Ichnos treats it as another input; its value is in CI neutrality, builders without Docker and an open set of evidence-based rules.
 - BuildKit's history record and status stream are undocumented and versioned `v0`, although most provenance fields are documented. How often will they change?
-- How does the `gha` cache behave? The lab has measured local and registry caches only: an empty cache left the build running, and a missing blob failed it. This also decides whether an `evicted` cause can exist.
-- Should Ichnos explain builds that failed? A missing cache blob is a cache problem that never reaches a cache miss.
+- Does the record show a lost `gha` blob? The lab found that a missing blob fails the build on local and registry caches, but on `gha` the step logged an error, reran and succeeded. If the record keeps that error, an `evicted` cause can be added.
+- Does a pull request reach its base branch's `gha` cache? The lab has measured one branch only.
+- Should Ichnos explain builds that failed? A missing blob on a local or registry cache is a cache problem that never reaches a cache miss.
 - How much does fingerprinting copied sources cost on a large build context? It has not been built or measured yet. Without it, a generated file that the pull request diff cannot see would be reported as `incomplete-cache`.
 
 ### Pros
@@ -316,7 +317,7 @@ gates:
 ### Security Considerations
 
 - **Permissions:** the analysis job runs with a read-only token. Only the publish job can comment, and it never runs pull request code.
-- **Information flow:** build records may contain cache tokens, credentials, build argument values and signed URLs. Redaction runs before any snapshot is written. Snapshots store redacted Dockerfile text instead of step names, build argument and environment values are stored only as hashes, and import errors are stored as a class, never as raw text. Dockerfile text otherwise keeps what the repository commits, including literal `ENV` values. A hash does not hide a value that can be guessed, so a secret must use a BuildKit secret, which the lab found in no part of a build record.
+- **Information flow:** build records may contain cache tokens, credentials, build argument values, signed URLs and, on GitHub Actions, the whole event payload, which includes the pusher's email address on a `push`. Redaction runs before any snapshot is written, and snapshots never copy the event payload. Snapshots store redacted Dockerfile text instead of step names, build argument and environment values are stored only as hashes, and import errors are stored as a class, never as raw text. Dockerfile text otherwise keeps what the repository commits, including literal `ENV` values. A hash does not hide a value that can be guessed, so a secret must use a BuildKit secret, which the lab found in no part of a build record.
 - **Surface exposed to untrusted input:** `report.json` crosses the trust boundary and is checked against its schema and size limit before use. Dockerfile text and file paths are escaped, and `@` mentions are neutralized, before posting.
 - **Supply chain:** every action is pinned to a full commit SHA, there is no `pull_request_target`, and releases are signed and immutable.
 
