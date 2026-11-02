@@ -58,7 +58,7 @@ Step definitions in the provenance do not have this problem, because [BuildKit r
 It is still a candidate, not a result:
 
 - Nothing in this repository runs it yet.
-- It has seen one BuildKit version and one platform, and every recorded scenario is a single-stage build with a local cache. Multi-platform builds, subdirectory contexts, wildcards, several imports and rotating build arguments are untested, and the prototype does not handle most of them yet.
+- It has seen one BuildKit version and one platform, and every recorded scenario is a single-stage build that uses a local cache or none. Multi-platform builds, subdirectory contexts, wildcards, several imports and rotating build arguments are untested, and the prototype does not handle most of them yet.
 - Identical lines, a changed line next to an added one, and `.dockerignore` with a Git context are untested. "An instruction was added" rests on `added-step` alone.
 - The `gha` cache has not been tested at all.
 - One record cannot separate changed content from an incomplete cache or from a `.dockerignore` change, which is why the pull request diff is still needed.
@@ -71,7 +71,7 @@ These ran once on the same BuildKit version, and no record here covers them yet.
 - **Empty cache:** with `type=local`, the build ran, and the record shows no import at all. With `type=registry`, the build ran, and the `importing cache manifest` vertex has an error.
 - **Missing blob:** deleting one layer from a local or a registry cache failed the build, so neither case reached a cache miss.
 - **`mode=min`:** an unchanged build hit every step. The first stage reran only when a later line needed it.
-- **Overwritten cache:** when another branch overwrote the cache, a `COPY` missed with no change in the pull request. Only the pull request diff separates this from changed content.
+- **Overwritten cache:** when another branch overwrote the cache, a `COPY` missed with no change in the pull request. The records alone cannot separate this from changed content, so it needs the pull request diff or source fingerprints.
 - **Git context:** with `https://` contexts at two commits, the source identifier holds the commit and the source has `git.*` attributes. An unchanged file still hit the cache, and a changed file missed.
 - **`no-cache`:** the record keeps it in `FrontendAttrs`.
 - **Layer digests:** they match on a hit but differ on every rerun, even with identical content, so they cannot show that content is unchanged.

@@ -192,7 +192,7 @@ The explanation follows the shape of BuildBuddy's `bb explain`: each step is bas
 |---|---|
 | The `no-cache` setting covers the step | `no-cache` |
 | The record shows no cache import, and no step hit | `no-cache-import` |
-| Every cache import reported an error | `cache-import-failed` |
+| At least one cache import is recorded, and every one reported an error | `cache-import-failed` |
 | A cache import is recorded, and no step hit | `cache-not-used` |
 | The step has a withheld input | `unknown` |
 | The step has no build context or remote source ancestor | `incomplete-cache` |
@@ -264,7 +264,7 @@ gates:
 |---|---|---|
 | `ichnos collect` | Build job | Capture a build record; redact; write `snapshot.json` |
 | `ichnos check` | Pull request job | Fetch the baseline, compare, explain and audit; write `report.json` |
-| `ichnos compare BASE PR` | Anywhere | The same analysis, offline, from two records, without a pull request diff |
+| `ichnos compare BASE PR` | Anywhere | The same analysis, offline, from two records. It has no pull request diff, so causes that need one are `unknown`. |
 | `ichnos audit` | Anywhere | Audit the configuration with no baseline |
 | `ichnos render -f FORMAT` | Anywhere | Render `report.json` as markdown, json, sarif or codequality |
 | `ichnos publish github` | Trusted job | Validate, render and update the pull request comment |
