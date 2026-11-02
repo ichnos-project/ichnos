@@ -31,9 +31,11 @@ This needs Docker with its socket at `/var/run/docker.sock`, and `jq`. It create
 
 The records are public, and a record keeps the build folder and the Docker socket path. So the script builds in `/tmp/ichnos-lab` through the default socket, and it stops if a record contains the local user name, host name or macOS temporary path. Check new records by hand as well: fixtures must never use real credentials or private content.
 
+The `gha` cache and the default Git context only exist on GitHub Actions, so `lab/gha` measures them there with a smaller build. Start it by hand with `gh workflow run lab-gha.yml -f mode=export`, land a commit, then run it with `-f mode=import` from that commit, or `-f mode=import-empty` to import a scope that has no cache. Artifacts in a public repository can be downloaded, so the workflow removes the trace, stops if anything matches its secret pattern, and keeps the record for one day. A reduced record still names the deleted trace, so it is for inspection and does not belong in `testdata/`.
+
 ## What the Records Show
 
-These facts come from records made with BuildKit v0.34.0 and buildx v0.28.0-desktop.1 for `linux/amd64`. Update the versions here when you re-record.
+These facts come from records made with BuildKit v0.34.0 and buildx v0.28.0-desktop.1 for `linux/amd64`. Update the versions here when you re-record, and keep the pins in `lab/record.sh`, `lab/gha/Dockerfile` and `.github/workflows/lab-gha.yml` together.
 
 ### Format
 
@@ -60,7 +62,7 @@ It is still a candidate, not a result:
 - Nothing in this repository runs it yet.
 - It has seen one BuildKit version and one platform, and every recorded scenario is a single-stage build that uses a local cache or none. Multi-platform builds, subdirectory contexts, wildcards, several imports and rotating build arguments are untested, and the prototype does not handle most of them yet.
 - Identical lines, a changed line next to an added one, and `.dockerignore` with a Git context are untested. "An instruction was added" rests on `added-step` alone.
-- The `gha` cache has not been tested at all.
+- A pull request reading its base branch's `gha` cache has not been tested.
 - One record cannot separate changed content from an incomplete cache or from a `.dockerignore` change, which is why the pull request diff is still needed.
 
 ### Other experiments
@@ -73,6 +75,9 @@ These ran once on the same BuildKit version, and no record here covers them yet.
 - **`mode=min`:** an unchanged build hit every step. The first stage reran only when a later line needed it.
 - **Overwritten cache:** when another branch overwrote the cache, a `COPY` missed with no change in the pull request. The records alone cannot separate this from changed content, so it needs the pull request diff or source fingerprints.
 - **Git context:** with `https://` contexts at two commits, the source identifier holds the commit and the source has `git.*` attributes. An unchanged file still hit the cache, and a changed file missed.
+- **`gha` cache:** on GitHub Actions, with buildx v0.38.1 and the default Git context, one branch's later commit hit every step after `FROM`, and a changed `app.txt` missed its `COPY` and `RUN`. An empty scope let the build run with no hits and no error on the import. A deleted blob did not fail the build, unlike local and registry caches: the step logged `blob not found`, reran and succeeded.
+- **GitHub event data:** buildx copies the whole event into the provenance and the build metadata, and `docker/build-push-action` prints the metadata in its log. A `push` event includes the pusher's email address, so `BUILDX_METADATA_PROVENANCE=disabled` keeps it out of the log, and `reduce-record.sh` stops on any email address.
+- **Real tokens:** two complete records from GitHub Actions, trace included, held neither the job token nor the runtime token, in plain, base64 or URL-encoded form, with a `gha` cache, a Git context and a registry login in use. All 32 `authorization` headers were masked, and the only signed URLs were CDN links to public image layers.
 - **`no-cache`:** the record keeps it in `FrontendAttrs`.
 - **Layer digests:** they match on a hit but differ on every rerun, even with identical content, so they cannot show that content is unchanged.
 - **Exported cache:** identical content with fresh timestamps kept all 8 cache records, and changed content changed 1. Reading it needs access to the cache backend.
