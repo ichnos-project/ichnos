@@ -41,7 +41,7 @@ $ ichnos compare main.dockerbuild pr.dockerbuild
 
 ## How It Works
 
-Ichnos reads the build record BuildKit keeps for every build and removes secrets from it. It matches each step with the same step in the base branch's build, by Dockerfile location and instruction, and finds the first step that missed the cache without being explained by the pull request's own changes. It then checks the cache setup against rules that fire only on evidence, and reports the result as a pull request comment, JSON, SARIF or OpenTelemetry data. By default it never fails a build.
+Ichnos reads the build record BuildKit keeps for every build and removes secrets from it. It matches each step with the same step in the base branch's build, by its Dockerfile instruction, and finds the first step that missed the cache without being explained by the pull request's own changes. It then checks the cache setup against rules that fire only on evidence, and reports the result as a pull request comment, JSON, SARIF or OpenTelemetry data. By default it never fails a build.
 
 An example of the planned pull request comment:
 

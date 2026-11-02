@@ -10,7 +10,7 @@ Every team that builds containers in CI should know why a build was slow, withou
 
 | Release | Target | Theme | Includes |
 |---|---|---|---|
-| v0.1 | Jan 2027 | Pinpoint | Read BuildKit build records; compare two builds step by step; name the first miss and the input that changed; minutes lost per miss; JSON and Markdown output |
+| v0.1 | Jan 2027 | Pinpoint | Read BuildKit build records; compare two builds step by step; name the first miss and, when the records show it, the input that changed; minutes lost per miss; JSON and Markdown output |
 | v0.2 | Mar 2027 | Explain in the pull request | Causes with confidence levels; changed files from the pull request diff; builder-version changes; the GitHub Action with fork-safe comments |
 | v0.3 | May 2027 | Audit | Cache setup audit rules with fixes; SARIF output; a versioned configuration file with a JSON Schema |
 | v0.4 | Aug 2027 | Anywhere | GitLab CI, Buildkite, Jenkins and Tekton; builds without Docker through `buildctl` |
