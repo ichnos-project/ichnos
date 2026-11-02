@@ -292,7 +292,7 @@ gates:
 - Will Docker add a base-versus-pull-request comparison to its own build summary? If it does, Ichnos treats it as another input; its value is in CI neutrality, builders without Docker and an open set of evidence-based rules.
 - BuildKit's history record and status stream are undocumented and versioned `v0`, although most provenance fields are documented. How often will they change?
 - Does the record show a lost `gha` blob? The lab found that a missing blob fails the build on local and registry caches, but on `gha` the step logged an error, reran and succeeded. If the record keeps that error, an `evicted` cause can be added.
-- Does a pull request reach its base branch's `gha` cache? The lab has measured one branch only.
+- Does a `pull_request` event reach its base branch's `gha` cache? The lab has measured a branch reading the default branch's cache, not a pull request.
 - Should Ichnos explain builds that failed? A missing blob on a local or registry cache is a cache problem that never reaches a cache miss.
 - How much does fingerprinting copied sources cost on a large build context? It has not been built or measured yet. Without it, a generated file that the pull request diff cannot see would be reported as `incomplete-cache`.
 

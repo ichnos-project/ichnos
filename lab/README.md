@@ -62,7 +62,7 @@ It is still a candidate, not a result:
 - Nothing in this repository runs it yet.
 - It has seen one BuildKit version and one platform, and every recorded scenario is a single-stage build that uses a local cache or none. Multi-platform builds, subdirectory contexts, wildcards, several imports and rotating build arguments are untested, and the prototype does not handle most of them yet.
 - Identical lines, a changed line next to an added one, and `.dockerignore` with a Git context are untested. "An instruction was added" rests on `added-step` alone.
-- A pull request reading its base branch's `gha` cache has not been tested.
+- A branch read the default branch's `gha` cache, but a real `pull_request` event has not been tested.
 - One record cannot separate changed content from an incomplete cache or from a `.dockerignore` change, which is why the pull request diff is still needed.
 
 ### Other experiments
@@ -75,8 +75,8 @@ These ran once on the same BuildKit version, and no record here covers them yet.
 - **`mode=min`:** an unchanged build hit every step. The first stage reran only when a later line needed it.
 - **Overwritten cache:** when another branch overwrote the cache, a `COPY` missed with no change in the pull request. The records alone cannot separate this from changed content, so it needs the pull request diff or source fingerprints.
 - **Git context:** with `https://` contexts at two commits, the source identifier holds the commit and the source has `git.*` attributes. An unchanged file still hit the cache, and a changed file missed.
-- **`gha` cache:** on GitHub Actions, with buildx v0.38.1 and the default Git context, one branch's later commit hit every step after `FROM`, and a changed `app.txt` missed its `COPY` and `RUN`. An empty scope let the build run with no hits and no error on the import. A deleted blob did not fail the build, unlike local and registry caches: the step logged `blob not found`, reran and succeeded.
-- **GitHub event data:** buildx copies the whole event into the provenance and the build metadata, and `docker/build-push-action` prints the metadata in its log. A `push` event includes the pusher's email address, so `BUILDX_METADATA_PROVENANCE=disabled` keeps it out of the log, and `reduce-record.sh` stops on any email address.
+- **`gha` cache:** on GitHub Actions, with buildx v0.38.1 and the default Git context, a later commit on another branch read the default branch's cache and hit every step after `FROM`, and a changed `app.txt` missed its `COPY` and `RUN`. An empty scope let the build run with no hits and no error on the import. A deleted blob did not fail the build, unlike local and registry caches: the step logged `blob not found`, reran and succeeded.
+- **GitHub event data:** buildx copies the whole event into the provenance and the build metadata, and `docker/build-push-action` prints the metadata in its log. A `push` event includes the pusher's email address, so `BUILDX_METADATA_PROVENANCE=disabled` keeps it out of the log. `reduce-record.sh` removes the event from the record, and stops on any email address that is left.
 - **Real tokens:** two complete records from GitHub Actions, trace included, held neither the job token nor the runtime token, in plain, base64 or URL-encoded form, with a `gha` cache, a Git context and a registry login in use. All 32 `authorization` headers were masked, and the only signed URLs were CDN links to public image layers.
 - **`no-cache`:** the record keeps it in `FrontendAttrs`.
 - **Layer digests:** they match on a hit but differ on every rerun, even with identical content, so they cannot show that content is unchanged.

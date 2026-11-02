@@ -40,31 +40,42 @@ expect_stop() {
 
 unpack
 "$script" "$fixture" "$work/output" >"$work/log"
-if tar -tzf "$work/output" | grep -q "$trace"; then
+tar -tzf "$work/output" >"$work/listing"
+if grep -q "$trace" "$work/listing"; then
   echo 'the trace is still in the output' >&2
   exit 1
 fi
-tar -tzf "$work/output" | grep -q "$provenance"
-tar -tzf "$work/output" | grep -q "$status_stream"
+grep -q "$provenance" "$work/listing"
+grep -q "$status_stream" "$work/listing"
 if ! grep -q 'secret-shaped lines in the trace: [1-9]' "$work/log"; then
   echo 'the signed URLs in the trace were not counted' >&2
   exit 1
 fi
 
 unpack
-printf 'https://example.test/a?sv=1%ssig=planted' "$escaped_ampersand" >>"$blobs/$provenance"
-expect_stop 'escaped signed URL in the provenance'
+edit_json "$blobs/$provenance" '.buildDefinition.internalParameters.github_event_payload = {repository: {ssh_url: "git@github.com:a/b.git"}, pusher: {email: "someone@example.test"}}'
+tar -czf "$work/input" -C "$work/record" index.json oci-layout blobs
+"$script" "$work/input" "$work/output" >/dev/null
+tar -xzOf "$work/output" >"$work/contents"
+if LC_ALL=C grep -a -q github_event_payload "$work/contents"; then
+  echo 'the GitHub event is still in the output' >&2
+  exit 1
+fi
 
 unpack
-printf 'https://example.test/a?sv=1&sig=planted' >>"$blobs/$provenance"
-expect_stop 'signed URL in the provenance'
+printf 'https://example.test/a?sv=1%ssig=planted' "$escaped_ampersand" >>"$blobs/$status_stream"
+expect_stop 'escaped signed URL in the status stream'
 
 unpack
-printf 'https://example.test/a?X-Amz-Signature=planted' >>"$blobs/$provenance"
-expect_stop 'AWS signed URL in the provenance'
+printf 'https://example.test/a?sv=1&sig=planted' >>"$blobs/$status_stream"
+expect_stop 'signed URL in the status stream'
 
 unpack
-printf '"email": "someone@example.test"' >>"$blobs/$provenance"
+printf 'https://example.test/a?X-Amz-Signature=planted' >>"$blobs/$status_stream"
+expect_stop 'AWS signed URL in the status stream'
+
+unpack
+edit_json "$blobs/$provenance" '.planted = "someone@example.test"'
 expect_stop 'email address in the provenance'
 
 unpack

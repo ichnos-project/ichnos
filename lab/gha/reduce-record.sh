@@ -34,6 +34,11 @@ matches=$(LC_ALL=C grep -a -c -E "$secret" "$blobs/$trace") || status=$?
 echo "secret-shaped lines in the trace: $matches"
 rm -f "$blobs/$trace"
 
+for provenance in $(jq -r '.layers[] | select(.mediaType == "application/vnd.in-toto+json") | .digest | ltrimstr("sha256:")' "$blobs/$manifest"); do
+  jq 'del(.buildDefinition.internalParameters.github_event_payload)' "$blobs/$provenance" >"$work/provenance"
+  mv -f "$work/provenance" "$blobs/$provenance"
+done
+
 status=0
 LC_ALL=C grep -a -r -q -E "$secret" "$work" || status=$?
 case $status in
