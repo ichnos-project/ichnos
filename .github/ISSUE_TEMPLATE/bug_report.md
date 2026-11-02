@@ -36,4 +36,4 @@ What actually happened.
 
 ## Additional Context
 
-Add any other context, screenshots, or log output about the problem here. Remove tokens and credentials from anything you paste.
+Add any other context, screenshots, or log output about the problem here. Remove tokens and credentials from anything you paste: build records can contain them.
