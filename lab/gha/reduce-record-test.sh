@@ -40,12 +40,13 @@ expect_stop() {
 
 unpack
 "$script" "$fixture" "$work/output" >"$work/log"
-if tar -tzf "$work/output" | grep -q "$trace"; then
+tar -tzf "$work/output" >"$work/listing"
+if grep -q "$trace" "$work/listing"; then
   echo 'the trace is still in the output' >&2
   exit 1
 fi
-tar -tzf "$work/output" | grep -q "$provenance"
-tar -tzf "$work/output" | grep -q "$status_stream"
+grep -q "$provenance" "$work/listing"
+grep -q "$status_stream" "$work/listing"
 if ! grep -q 'secret-shaped lines in the trace: [1-9]' "$work/log"; then
   echo 'the signed URLs in the trace were not counted' >&2
   exit 1
@@ -55,7 +56,8 @@ unpack
 edit_json "$blobs/$provenance" '.buildDefinition.internalParameters.github_event_payload = {repository: {ssh_url: "git@github.com:a/b.git"}, pusher: {email: "someone@example.test"}}'
 tar -czf "$work/input" -C "$work/record" index.json oci-layout blobs
 "$script" "$work/input" "$work/output" >/dev/null
-if tar -xzOf "$work/output" | LC_ALL=C grep -a -q github_event_payload; then
+tar -xzOf "$work/output" >"$work/contents"
+if LC_ALL=C grep -a -q github_event_payload "$work/contents"; then
   echo 'the GitHub event is still in the output' >&2
   exit 1
 fi
