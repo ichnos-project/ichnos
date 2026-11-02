@@ -10,10 +10,6 @@
 
 <!-- The commands you ran, and any real builds you tried. Remove tokens and credentials from anything you paste: build records can contain them. -->
 
-## AI usage
-
-<!-- Yes or No. If yes, briefly say how it was used. -->
-
 ## Checklist
 
 <!-- Delete items that do not apply. -->
@@ -22,4 +18,4 @@
 - [ ] User-facing changes are documented.
 - [ ] A breaking change to the CLI, configuration, snapshot or report formats, or audit rules has `!` before the colon in its title.
 - [ ] Any change to how untrusted input or secrets are handled is explained above.
-- [ ] I understand this change and can explain it, whatever tools I used.
+- [ ] I understand this change and can explain it.
