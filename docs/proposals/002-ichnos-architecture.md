@@ -161,7 +161,7 @@ A collector returns a raw `Record`, and one function in `collect` turns it into 
 
 A snapshot is Ichnos's own normalized view of one build. It shields every consumer from BuildKit's undocumented formats. It contains:
 
-- **Steps,** one list per platform: the Dockerfile text and location from BuildKit's provenance, the operation type, the cached flag, start and end times, the kind (build step, cache import, cache export or internal), its fingerprints, and whether it descends from a local or Git build context. Step names are not stored, because BuildKit expands build arguments into them.
+- **Steps,** one list per platform: the Dockerfile text and location from BuildKit's provenance, the operation type, the cached flag, which is false for a step that reported an error, start and end times, the kind (build step, cache import, cache export or internal), its fingerprints, and whether it descends from a local or Git build context. Step names are not stored, because BuildKit expands build arguments into them.
 - **Materials:** base images, remote `ADD` sources and Git sources, with their digests. URLs are stored as hashes.
 - **Build context:** its directory relative to the repository root, the `.dockerignore` patterns and the `COPY` and `ADD` sources. When the build context is on disk, each source that the patterns admit also has a fingerprint of its content.
 - **Cache imports and exports:** each import with its type and whether it failed, as an error class and never the raw error; the `no-cache` setting with any stage filter; exports inferred from step names, because BuildKit does not store export settings.
@@ -191,6 +191,7 @@ The explanation follows the shape of BuildBuddy's `bb explain`: each step is bas
 | Evidence | Cause |
 |---|---|
 | The `no-cache` setting covers the step | `no-cache` |
+| The step reported a cache hit, then an error, and reran | `evicted` |
 | The record shows no cache import, and no step hit | `no-cache-import` |
 | At least one cache import is recorded, and every one reported an error | `cache-import-failed` |
 | A cache import is recorded, and no step hit | `cache-not-used` |
@@ -203,7 +204,7 @@ CI configuration and the CI API can narrow `incomplete-cache` and `cache-not-use
 
 A diff is unavailable under `ichnos compare`, in a shallow checkout, or when a built commit is unknown. That counts as no evidence, never as an empty diff, and so does a build context directory that is unknown. For a step that copies from the build context, the report then gives `unknown` and lists the possible causes in its evidence, including a `.dockerignore` change when the patterns differ. Below the confidence threshold, Ichnos also reports `unknown` and shows its evidence.
 
-Steps are never aligned or compared by digest, line number or step name. Each build gives its build context a new session ID, which changes the digest of every step that descends from it even when nothing changed. A digest rule in an earlier version of this proposal failed for that reason, and the [scenario lab](../../lab/README.md) has the measurements. Line numbers shift when a line is added, and step names contain expanded build arguments. Causes ship as alpha until the lab measures them on the `gha` cache and on more BuildKit versions.
+Steps are never aligned or compared by digest, line number or step name. Each build gives its build context a new session ID, which changes the digest of every step that descends from it even when nothing changed. A digest rule in an earlier version of this proposal failed for that reason, and the [scenario lab](../../lab/README.md) has the measurements. Line numbers shift when a line is added, and step names contain expanded build arguments. Causes ship as alpha until the lab measures them on more BuildKit versions and on real projects.
 
 ### Audit rules
 
@@ -291,8 +292,6 @@ gates:
 
 - Will Docker add a base-versus-pull-request comparison to its own build summary? If it does, Ichnos treats it as another input; its value is in CI neutrality, builders without Docker and an open set of evidence-based rules.
 - BuildKit's history record and status stream are undocumented and versioned `v0`, although most provenance fields are documented. How often will they change?
-- Does the record show a lost `gha` blob? The lab found that a missing blob fails the build on local and registry caches, but on `gha` the step logged an error, reran and succeeded. If the record keeps that error, an `evicted` cause can be added.
-- Does a `pull_request` event reach its base branch's `gha` cache? The lab has measured a branch reading the default branch's cache, not a pull request.
 - Should Ichnos explain builds that failed? A missing blob on a local or registry cache is a cache problem that never reaches a cache miss.
 - How much does fingerprinting copied sources cost on a large build context? It has not been built or measured yet. Without it, a generated file that the pull request diff cannot see would be reported as `incomplete-cache`.
 
