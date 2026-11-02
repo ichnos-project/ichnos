@@ -9,7 +9,7 @@
 **Checklist**:
 
 - [ ] Snapshot, report and configuration schemas (`schemaVersion` 1, `v1alpha1`)
-- [ ] Collectors: `.dockerbuild` bundle and `rawjson` progress stream
+- [ ] Collectors: `.dockerbuild` bundle, and `rawjson` progress stream for timing and hit rates
 - [ ] Step matching, comparison and first-miss explanation
 - [ ] Audit rule registry and rules
 - [ ] Renderers: Markdown, JSON, SARIF
@@ -56,7 +56,7 @@ A pull request comment that names the first unexpected miss, its cause, its cost
 3. Audit the cache configuration with rules that fire only on evidence.
 4. Report the minutes lost to misses, cache import and cache export.
 5. Run safely on pull requests from forks.
-6. Work with any CI system and any BuildKit client, not only Docker and GitHub.
+6. Work with any CI system, not only GitHub. Explanations need a Dockerfile build, because they rely on its provenance; other BuildKit clients get timing and hit rates.
 
 ## Non-Goals
 
@@ -106,7 +106,7 @@ pkg/                              public; documented as unstable until v1.0
   config/                         v1alpha1 types, Default(), Load(), Validate()
 internal/
   cli/                            cobra commands, flag table, exit codes
-  collect/                        bundle, rawjson and buildctl collectors; redaction
+  collect/                        bundle, rawjson and buildctl collectors; redaction and fingerprints
   baseline/                       file, GitHub cache, GitHub artifact, GitLab, OCI providers
   ci/                             CI context: event, refs, merge base, cache mode
   match/ compare/ explain/
@@ -129,7 +129,7 @@ package collect
 
 type Collector interface {
 	Name() string
-	Collect(ctx context.Context, src Source) (*snapshot.Snapshot, error)
+	Collect(ctx context.Context, src Source) (*Record, error)
 }
 
 package baseline
@@ -155,28 +155,55 @@ type Settings struct {
 }
 ```
 
-Redaction is a decorator that the constructor wraps around every collector, so no collector can skip it. Buildx copies the GitHub Actions cache token and cloud credentials into cache settings, so build records must be treated as secret-bearing input.
+A collector returns a raw `Record`, and one function in `collect` turns it into a `snapshot.Snapshot`, redacting values before it hashes them, so no collector can skip either step. The only other way to get a snapshot is to decode a stored baseline. Buildx copies the GitHub Actions cache token and cloud credentials into cache settings, and the [scenario lab](../../lab/README.md#other-experiments) found build argument values in step names, status streams, traces and provenance, and signed URLs in traces, so build records must be treated as secret-bearing input.
 
 ### Snapshot
 
 A snapshot is Ichnos's own normalized view of one build. It shields every consumer from BuildKit's undocumented formats. It contains:
 
-- **Steps:** a stable key, the step name without its `#N` prefix, the digest, the cached flag, start and end times, the kind (build step, cache import, cache export or internal), and the Dockerfile location from BuildKit's provenance.
-- **Materials:** base images and their digests.
-- **Cache imports and exports:** imports from the record; exports inferred from step names, because BuildKit does not store export settings.
+- **Steps,** one list per platform: the Dockerfile text and location from BuildKit's provenance, the operation type, the cached flag, start and end times, the kind (build step, cache import, cache export or internal), its fingerprints, and whether it descends from a local or Git build context. Step names are not stored, because BuildKit expands build arguments into them.
+- **Materials:** base images, remote `ADD` sources and Git sources, with their digests. URLs are stored as hashes.
+- **Build context:** its directory relative to the repository root, the `.dockerignore` patterns and the `COPY` and `ADD` sources. When the build context is on disk, each source that the patterns admit also has a fingerprint of its content.
+- **Cache imports and exports:** each import with its type and whether it failed, as an error class and never the raw error; the `no-cache` setting with any stage filter; exports inferred from step names, because BuildKit does not store export settings.
 - **Build arguments:** names, with hashed values.
-- **`SOURCE_DATE_EPOCH`**, the CI event and its cache mode, and the builder versions.
+- **`SOURCE_DATE_EPOCH`**, the built commit, the CI event and its cache mode, the builder versions and the fingerprint version.
+
+A build with no provenance has timing and hit rates but no Dockerfile text or fingerprints, so it cannot be compared. This covers the `rawjson` collector and builds that use no Dockerfile. The report says so, and never treats a comparison it could not make as no misses.
+
+Fingerprints are SHA-256 hashes with a fixed prefix, which stops generic lookup tables, computed at collect time from the step definitions in the provenance. Each step has one for its command, one for each environment variable by name, and one for its other fields, such as the user and mounts, so a report can name what changed without storing a value. They leave out fields that BuildKit leaves out of its own cache key, such as proxy settings. Another covers the step and everything it descends from. It is computed once per step, inputs first, and it follows what `inputs` points to, because step IDs shift when a step is inserted. A record with a cycle or an unknown input is rejected.
+
+The ancestor fingerprint keeps build context details out, so that only real changes count. It leaves out `local.followpaths` and `local.excludepatterns`, because a change to either would otherwise look like a change to every `COPY` step. For a Git context it leaves out the commit and the `git.*` attributes, because the commit changes on every build.
+
+A variable whose name looks like a credential is withheld: its value is left out of every fingerprint, and the snapshot records that the step has a withheld input. A value redacted from a definition counts the same way. Dockerfile text goes through the same redaction. A source fingerprint missing on either side counts as no evidence, not as a change.
+
+Two snapshots compare only when their fingerprint versions match. Otherwise every step would look changed, so the report says the comparison is unavailable. When only the BuildKit versions differ, the comparison runs at lower confidence.
 
 ### Explanation algorithm
 
-The explanation follows the shape of BuildBuddy's `bb explain`: each step is base-only, PR-only, modified or unchanged; a modified step lists typed changes, whether the pull request explains it, and how many later misses it caused.
+The explanation follows the shape of BuildBuddy's `bb explain`: each step is base-only, PR-only, moved, modified or unchanged; a modified step lists typed changes, whether the pull request explains it, and how many later misses it caused.
 
-1. **Align steps** between the base and pull request builds by Dockerfile location and instruction. Never align by digest, because a digest changes whenever anything above it changes.
-2. **Mark expected misses.** A miss is expected when, under Docker's documented invalidation rules, the instruction text or a build argument changed, the base image digest changed, a `COPY` or `ADD` source appears in the pull request diff (after `.dockerignore`), `SOURCE_DATE_EPOCH` changed, or an earlier expected miss cascades into it.
-3. **Report the first miss that nothing explains**, and fold the misses that cascade from it into one line.
-4. **Classify the cause:** `no-cache-import`, `scope-mismatch`, `min-mode`, `evicted`, `readonly-trigger`, `cold-builder`, `builder-version`, `nondeterministic-input` or `unknown`.
+1. **Check whether the cache arrived**, and report it for every build, whatever else the analysis finds: each import, whether it failed, and the `no-cache` setting.
+2. **Align steps** between the base and pull request builds, one platform at a time, by Dockerfile text and operation type, in Dockerfile order. A platform in only one build is reported as not compared. Text that appears once in both builds anchors the match, and the longest run of anchors in the same order is kept. An anchor left out of that run moved, and stays paired with its base step. Between anchors, equal lines at each end match, and the remaining lines pair in order with lines of the same instruction keyword as modified steps. A line still without a partner is PR-only or base-only.
+3. **Mark expected misses.** A miss is expected when any field of the step's definition or its materials changed, when the step is PR-only, when its ancestor fingerprint changed, when a `COPY` or `ADD` source appears in the diff between the two built commits (after `.dockerignore`) or has a changed content fingerprint, when the changed `.dockerignore` patterns can affect its sources, or when it descends from another expected miss. Paths match using the build context directory and BuildKit's wildcard rules.
+4. **Report the first miss that nothing explains**, and fold the misses that cascade from it into one line. An image source never reports a hit, so an unchanged one is not a miss.
+5. **Classify the cause**, using the first row that matches:
 
-When a step's digest changed, the changed input is read directly from the records. When the digest is unchanged but the step missed the cache, either copied content changed or the cache never arrived. That rule is inferred from BuildKit's design, so causes that rely on it ship as alpha until the scenario lab measures them. Below the confidence threshold, Ichnos reports `unknown` and shows its evidence.
+| Evidence | Cause |
+|---|---|
+| The `no-cache` setting covers the step | `no-cache` |
+| The record shows no cache import, and no step hit | `no-cache-import` |
+| At least one cache import is recorded, and every one reported an error | `cache-import-failed` |
+| A cache import is recorded, and no step hit | `cache-not-used` |
+| The step has a withheld input | `unknown` |
+| The step has no build context or remote source ancestor | `incomplete-cache` |
+| The diff clears the step's copied sources | `incomplete-cache` |
+| Anything else | `unknown` |
+
+CI configuration and the CI API can narrow `incomplete-cache` and `cache-not-used` to `scope-mismatch`, `min-mode` or `readonly-trigger`, and snapshots can show `cold-builder` and `builder-version`. An empty `type=local` import leaves no trace in the record, so only CI configuration can tell it from no import. `nondeterministic-input` waits for the repeat-build mode in Future Milestones.
+
+A diff is unavailable under `ichnos compare`, in a shallow checkout, or when a built commit is unknown. That counts as no evidence, never as an empty diff, and so does a build context directory that is unknown. For a step that copies from the build context, the report then gives `unknown` and lists the possible causes in its evidence, including a `.dockerignore` change when the patterns differ. Below the confidence threshold, Ichnos also reports `unknown` and shows its evidence.
+
+Steps are never aligned or compared by digest, line number or step name. Each build gives its build context a new session ID, which changes the digest of every step that descends from it even when nothing changed. A digest rule in an earlier version of this proposal failed for that reason, and the [scenario lab](../../lab/README.md) has the measurements. Line numbers shift when a line is added, and step names contain expanded build arguments. Causes ship as alpha until the lab measures them on the `gha` cache and on more BuildKit versions.
 
 ### Audit rules
 
@@ -237,7 +264,7 @@ gates:
 |---|---|---|
 | `ichnos collect` | Build job | Capture a build record; redact; write `snapshot.json` |
 | `ichnos check` | Pull request job | Fetch the baseline, compare, explain and audit; write `report.json` |
-| `ichnos compare BASE PR` | Anywhere | The same analysis, offline, from two records |
+| `ichnos compare BASE PR` | Anywhere | The same analysis, offline, from two records. It has no pull request diff, so causes that need one are `unknown`. |
 | `ichnos audit` | Anywhere | Audit the configuration with no baseline |
 | `ichnos render -f FORMAT` | Anywhere | Render `report.json` as markdown, json, sarif or codequality |
 | `ichnos publish github` | Trusted job | Validate, render and update the pull request comment |
@@ -263,8 +290,10 @@ gates:
 ## Impacts / Key Questions
 
 - Will Docker add a base-versus-pull-request comparison to its own build summary? If it does, Ichnos treats it as another input; its value is in CI neutrality, builders without Docker and an open set of evidence-based rules.
-- BuildKit's build record formats are undocumented and versioned `v0`. How often will they change?
-- Is the unchanged-digest inference correct? The scenario lab must answer this before those causes leave alpha.
+- BuildKit's history record and status stream are undocumented and versioned `v0`, although most provenance fields are documented. How often will they change?
+- How does the `gha` cache behave? The lab has measured local and registry caches only: an empty cache left the build running, and a missing blob failed it. This also decides whether an `evicted` cause can exist.
+- Should Ichnos explain builds that failed? A missing cache blob is a cache problem that never reaches a cache miss.
+- How much does fingerprinting copied sources cost on a large build context? It has not been built or measured yet. Without it, a generated file that the pull request diff cannot see would be reported as `incomplete-cache`.
 
 ### Pros
 
@@ -287,8 +316,8 @@ gates:
 ### Security Considerations
 
 - **Permissions:** the analysis job runs with a read-only token. Only the publish job can comment, and it never runs pull request code.
-- **Information flow:** build records may contain cache tokens and credentials. Redaction runs before any snapshot is written, and build argument values are stored only as hashes.
-- **Surface exposed to untrusted input:** `report.json` crosses the trust boundary and is checked against its schema and size limit before use. Step names and Dockerfile snippets are escaped, and `@` mentions are neutralized, before posting.
+- **Information flow:** build records may contain cache tokens, credentials, build argument values and signed URLs. Redaction runs before any snapshot is written. Snapshots store redacted Dockerfile text instead of step names, build argument and environment values are stored only as hashes, and import errors are stored as a class, never as raw text. Dockerfile text otherwise keeps what the repository commits, including literal `ENV` values. A hash does not hide a value that can be guessed, so a secret must use a BuildKit secret, which the lab found in no part of a build record.
+- **Surface exposed to untrusted input:** `report.json` crosses the trust boundary and is checked against its schema and size limit before use. Dockerfile text and file paths are escaped, and `@` mentions are neutralized, before posting.
 - **Supply chain:** every action is pinned to a full commit SHA, there is no `pull_request_target`, and releases are signed and immutable.
 
 ## Future Milestones
@@ -310,17 +339,17 @@ gates:
 
 ### Update/Rollback Compatibility
 
-Readers accept the current and the previous snapshot schema version, so a baseline written by an older release can still be compared. Configuration files from older `apiVersion`s are converted. Rolling back the Action is a change of its pinned SHA.
+Readers accept the current and the previous snapshot schema version, so a baseline written by an older release can still be read. It can be compared only if its fingerprint version matches. Configuration files from older `apiVersion`s are converted. Rolling back the Action is a change of its pinned SHA.
 
 ### Scalability
 
-Ichnos processes one build record per run, in memory. Parsers enforce size limits on records, reports and comments.
+Ichnos holds the records it compares in memory. Parsers enforce size limits on records, reports and comments. Alignment is `n log n` and step fingerprints take one pass over the steps, so a very large Dockerfile cannot make them slow. Source fingerprints grow with the size of the build context, so they need a size budget.
 
 ### Implementation Phases/History
 
 | Release | Target | Scope |
 |---|---|---|
-| v0.1 | Jan 2027 | Offline compare; first miss and changed input; time accounting; JSON and Markdown |
+| v0.1 | Jan 2027 | Offline compare; first miss and, when the records show it, the changed input; time accounting; JSON and Markdown |
 | v0.2 | Mar 2027 | Causes with confidence; changed files from the diff; builder versions; GitHub Action |
 | v0.3 | May 2027 | Audit rules; SARIF; configuration file and JSON Schema; opt-in gates |
 | v0.4 | Aug 2027 | GitLab, Buildkite, Jenkins and Tekton; `buildctl` collector; OCI baselines |
@@ -328,3 +357,4 @@ Ichnos processes one build record per run, in memory. Parsers enforce size limit
 | v1.0 | 2028 | Stable contracts and deprecation policy |
 
 - 2026-10-28: proposal opened
+- 2026-11-02: replaced the digest rule with a comparison of step definitions, after the scenario lab disproved it

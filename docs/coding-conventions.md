@@ -91,7 +91,7 @@ Build records, snapshots, reports, configuration files, CI events and API respon
 ## Secrets
 
 * Never write tokens, credentials or build argument values to logs, errors, reports or telemetry.
-* Redaction wraps every collector and fails closed: when a credential key appears, the whole value is withheld. URL user information and query values are always removed.
+* Every collector's data passes through one redaction step, which fails closed: when a credential key appears, the whole value is withheld. URL user information and query values are always removed.
 * A test plants a known secret in every input and checks that it appears in no output.
 
 ## Network

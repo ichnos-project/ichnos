@@ -49,33 +49,32 @@ BuildKit documents the [provenance fields](https://github.com/moby/buildkit/blob
 
 ### Step digests
 
-The rule in [proposal 002](../docs/proposals/002-ichnos-architecture.md#explanation-algorithm) that a changed digest means a changed input does not hold, and the proposal still states it. In `control`, nothing changes, but lines 3-6 get a new digest and still hit the cache. In `no-cache-import`, the same steps get a new digest and miss. Each build gives its [build context a new session ID](https://github.com/moby/buildkit/blob/v0.34.0/frontend/dockerui/config.go#L463), which changes the digest of the context and of every step that descends from it. Only the numbered steps before the first `COPY` keep their digests, and the `[internal]` steps that load the build context, Dockerfile and `.dockerignore` change in every build.
+An earlier version of proposal 002 said that a changed digest means a changed input, which does not hold. In `control`, nothing changes, but lines 3-6 get a new digest and still hit the cache. In `no-cache-import`, the same steps get a new digest and miss. Each build gives its [build context a new session ID](https://github.com/moby/buildkit/blob/v0.34.0/frontend/dockerui/config.go#L463), which changes the digest of the context and of every step that descends from it. Only the numbered steps before the first `COPY` keep their digests, and the `[internal]` steps that load the build context, Dockerfile and `.dockerignore` change in every build.
 
 Step definitions in the provenance do not have this problem, because [BuildKit removes the session ID from them](https://github.com/moby/buildkit/blob/v0.34.0/solver/llbsolver/provenance/buildconfig.go#L94-L96). The `op` and `inputs` of each entry were identical in both `control` builds. Whole entries are not, because `resourceUsage` appears only on steps that ran.
 
-Comparing step definitions found no miss in `control` and the right cause in the other seven scenarios. This is a finding that proposal 002 has not adopted: its alignment differs from step 1 below, and its snapshot does not store what step 2 needs. The comparison works in three steps:
-
-1. Align the numbered steps of both builds in Dockerfile order by instruction text, which is the step name without its bracketed position. Line numbers alone are not enough, because an added line shifts every step after it. Before the first aligned step, between any two and after the last, pair the remaining base and pull request steps in order: each pair is a changed step, and a pull request step left with no partner was added.
-2. Compare each aligned step's `op`, and a fingerprint built from that `op` and the fingerprints of its inputs, working down from the first step. `inputs` links steps by ID, and those IDs shift when a step is inserted, so use what they point to, not the IDs. Ignore `local.followpaths` and `local.excludepatterns` here, because both sit on the build context: the first lists every `COPY` source and the second holds the `.dockerignore` patterns, so a change to either would otherwise change every `COPY` step's fingerprint. Compare `local.excludepatterns` separately between the two builds.
-3. Take the first miss, not counting an unchanged `FROM`. The first row that matches gives the cause.
-
-| First miss | Cause |
-|---|---|
-| The build imported no cache | No cache import |
-| The step has no partner in the base build | An instruction was added |
-| The `FROM` definition changed | The base image changed |
-| The step's definition changed | The instruction changed |
-| The step does not descend from the build context | Part of the cache is missing |
-| The `.dockerignore` patterns differ | `.dockerignore` changed, copied content changed, or part of the cache is missing |
-| Anything else | Copied content changed, or part of the cache is missing |
-
-These scenarios shaped the comparison, so passing them is not independent evidence. Each rule is needed, though: without the alignment in step 1 and the `local.followpaths` exception, it gets the causes of `added-step` and `added-copy` wrong, and without the `local.excludepatterns` handling it gets `changed-dockerignore` wrong.
+[Proposal 002](../docs/proposals/002-ichnos-architecture.md#explanation-algorithm) compares these definitions. A prototype of that comparison, which is not in this repository, was given each scenario's changed files, and it found no miss in `control` and the right cause in the other seven. Without those files, it could only list the possible causes for `changed-copy-file`, `added-copy` and `changed-dockerignore`. Each rule is needed: without alignment by Dockerfile text and the `local.followpaths` exception, it gets the causes of `added-step` and `added-copy` wrong, and without the `local.excludepatterns` handling it gets `changed-dockerignore` wrong. These scenarios shaped the comparison, so passing them is not independent evidence.
 
 It is still a candidate, not a result:
 
 - Nothing in this repository runs it yet.
-- It has seen one BuildKit version, one architecture and eight single-stage scenarios. Multi-stage builds, reordered lines, identical lines, a changed line next to an added one, and builds of 10 or more steps are untested. "An instruction was added" rests on `added-step` alone.
-- No scenario covers a partly missing cache, so those causes are unmeasured.
-- A removed line has no row, so it would be reported as a changed instruction.
-- BuildKit expands variables in `RUN` and `WORKDIR` step names, so a changed build argument could look like a changed line. Lines such as `ENV` create no step of their own, so adding one should appear as a changed `RUN`, not an added step. No scenario here records either case.
-- One record cannot separate changed content from a partly missing cache or from a `.dockerignore` change, which is why the pull request diff is still needed.
+- It has seen one BuildKit version and one platform, and every recorded scenario is a single-stage build that uses a local cache or none. Multi-platform builds, subdirectory contexts, wildcards, several imports and rotating build arguments are untested, and the prototype does not handle most of them yet.
+- Identical lines, a changed line next to an added one, and `.dockerignore` with a Git context are untested. "An instruction was added" rests on `added-step` alone.
+- The `gha` cache has not been tested at all.
+- One record cannot separate changed content from an incomplete cache or from a `.dockerignore` change, which is why the pull request diff is still needed.
+
+### Other experiments
+
+These ran once on the same BuildKit version, and no record here covers them yet.
+
+- **Planted values:** a `--build-arg` value appeared in step names, the status stream, the trace, `FrontendAttrs` and the provenance. An `ENV` literal appeared in the provenance and the image config. A `--secret` value appeared nowhere.
+- **Empty cache:** with `type=local`, the build ran, and the record shows no import at all. With `type=registry`, the build ran, and the `importing cache manifest` vertex has an error.
+- **Missing blob:** deleting one layer from a local or a registry cache failed the build, so neither case reached a cache miss.
+- **`mode=min`:** an unchanged build hit every step. The first stage reran only when a later line needed it.
+- **Overwritten cache:** when another branch overwrote the cache, a `COPY` missed with no change in the pull request. The records alone cannot separate this from changed content, so it needs the pull request diff or source fingerprints.
+- **Git context:** with `https://` contexts at two commits, the source identifier holds the commit and the source has `git.*` attributes. An unchanged file still hit the cache, and a changed file missed.
+- **`no-cache`:** the record keeps it in `FrontendAttrs`.
+- **Layer digests:** they match on a hit but differ on every rerun, even with identical content, so they cannot show that content is unchanged.
+- **Exported cache:** identical content with fresh timestamps kept all 8 cache records, and changed content changed 1. Reading it needs access to the cache backend.
+
+The comparison also gave the expected result on multi-stage builds, removed and reordered lines, an added `ENV` or `USER` line, a changed build argument and a build of 12 steps.
