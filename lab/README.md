@@ -43,7 +43,7 @@ BuildKit documents the [provenance fields](https://github.com/moby/buildkit/blob
 
 - A `.dockerbuild` file is a gzipped tar of an OCI layout with one manifest. Its config is the history record (`application/vnd.buildkit.historyrecord.v0`), and its layers are the trace, the status stream, the provenance and the result's manifest.
 - The status stream (`application/vnd.buildkit.status.v0`) is a series of frames: a 4-byte little-endian length, then a `StatusResponse` protobuf message. Each record here has one frame. Vertices have a digest, inputs, a name, a cached flag and times, and they are not in Dockerfile order. Step names start with a bracketed position such as `[2/6]`, `[ 1/12]` or `[builder 2/5]`, and its total changes when a `RUN`, `COPY`, `ADD` or `WORKDIR` line is added.
-- A vertex repeats within a frame, and later updates leave out `cached`. A step hit the cache if any update says so: keeping only the last update reports hits as misses.
+- A vertex repeats within a frame, and later updates leave out `cached`, so keeping only the last update reports hits as misses. A step hit the cache only if an update says so and no update has an error: a lost blob reports `cached`, then an error, then reruns. `numCachedSteps` still counts those steps.
 - The provenance (`application/vnd.in-toto+json`) is a bare SLSA predicate with no statement around it. It holds each step's definition, a map from vertex digest to step, each step's Dockerfile line, the resolved base image and the Dockerfile text. History records [always use `mode=max`](https://github.com/moby/buildkit/blob/v0.34.0/solver/llbsolver/history.go#L118-L121), whatever `FrontendAttrs` says.
 - `numCachedSteps` is missing, not zero, when no step hit.
 - `FrontendAttrs` has `cache-imports` only when the build imports a cache, and its attributes are empty for a local cache.
@@ -62,7 +62,7 @@ It is still a candidate, not a result:
 - Nothing in this repository runs it yet.
 - It has seen one BuildKit version and one platform, and every recorded scenario is a single-stage build that uses a local cache or none. Multi-platform builds, subdirectory contexts, wildcards, several imports and rotating build arguments are untested, and the prototype does not handle most of them yet.
 - Identical lines, a changed line next to an added one, and `.dockerignore` with a Git context are untested. "An instruction was added" rests on `added-step` alone.
-- A branch read the default branch's `gha` cache, but a real `pull_request` event has not been tested.
+- The `gha` results come from single runs of one small build.
 - One record cannot separate changed content from an incomplete cache or from a `.dockerignore` change, which is why the pull request diff is still needed.
 
 ### Other experiments
@@ -75,7 +75,7 @@ These ran once on the same BuildKit version, and no record here covers them yet.
 - **`mode=min`:** an unchanged build hit every step. The first stage reran only when a later line needed it.
 - **Overwritten cache:** when another branch overwrote the cache, a `COPY` missed with no change in the pull request. The records alone cannot separate this from changed content, so it needs the pull request diff or source fingerprints.
 - **Git context:** with `https://` contexts at two commits, the source identifier holds the commit and the source has `git.*` attributes. An unchanged file still hit the cache, and a changed file missed.
-- **`gha` cache:** on GitHub Actions, with buildx v0.38.1 and the default Git context, a later commit on another branch read the default branch's cache and hit every step after `FROM`, and a changed `app.txt` missed its `COPY` and `RUN`. An empty scope let the build run with no hits and no error on the import. A deleted blob did not fail the build, unlike local and registry caches: the step logged `blob not found`, reran and succeeded.
+- **`gha` cache:** on GitHub Actions, with buildx v0.38.1 and the default Git context, a real pull request and a later commit on another branch both read the default branch's cache and hit every step after `FROM`. A changed `app.txt` missed its `COPY` and `RUN`. An empty scope let the build run with no hits and no error on the import. A deleted blob did not fail the build, unlike local and registry caches: when the build needed that blob, the step reported a hit, then `blob not found`, reran and succeeded, and the record keeps the error. When it did not need that blob, nothing changed.
 - **GitHub event data:** buildx copies the whole event into the provenance and the build metadata, and `docker/build-push-action` prints the metadata in its log. A `push` event includes the pusher's email address, so `BUILDX_METADATA_PROVENANCE=disabled` keeps it out of the log. `reduce-record.sh` removes the event from the record, and stops on any email address that is left.
 - **Real tokens:** two complete records from GitHub Actions, trace included, held neither the job token nor the runtime token, in plain, base64 or URL-encoded form, with a `gha` cache, a Git context and a registry login in use. All 32 `authorization` headers were masked, and the only signed URLs were CDN links to public image layers.
 - **`no-cache`:** the record keeps it in `FrontendAttrs`.
