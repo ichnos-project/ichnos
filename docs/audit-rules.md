@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > Ichnos is not released yet. These rules are planned, and the list will grow.
 
-Each audit rule has a permanent ID, a documentation page and a suggested fix. A rule fires only on evidence from the build record, the CI configuration, the Dockerfile or the CI provider's API. Rule IDs are never reused or renamed.
+Each audit rule has a permanent ID, a documentation page and a suggested fix. A rule fires only on evidence from the build record, the CI configuration, the Dockerfile or the CI provider's API. Rule IDs are never reused, and a renamed rule keeps its old ID as an alias.
 
 | Rule | Fires when | Suggested fix |
 |---|---|---|
