@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 buildkit_version=v0.34.0
 buildkit_image="moby/buildkit:$buildkit_version@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c"
