@@ -45,6 +45,7 @@ Code is formatted with `gofumpt` and `goimports`, and every linter warning is an
 * `main` only calls `run`, which creates the context with `signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)`, because CI cancels jobs with SIGTERM. Only `main` calls `os.Exit`.
 * Build the command tree in constructors such as `NewRootCommand(streams)`, never in package variables or `init()`, so every test gets a fresh tree.
 * Each command fills an options struct from its flags, calls `opts.validate()`, then `run(ctx, opts, deps)`. Set `SilenceUsage` only after validation passes. Flags live only in `internal/cli`.
+* Export only what callers outside the package need. When a type has invariants, keep its fields unexported and validate them in its constructor.
 * Registries are explicit lists that reject duplicate and unknown names.
 * Inject access to the environment, the clock and the file system, so tests never change global state.
 * Pass a `context.Context` as the first argument to every function that does I/O or may block. Never store one in a struct, and never call `context.Background()` below `main`.
@@ -122,7 +123,7 @@ Every dependency is code the project must keep secure, so prefer the standard li
 
 * New behavior comes with tests, and a bug fix comes with a test that fails without it.
 * Prefer table-driven tests with `t.Run`. A failure message names the call and prints the result before the expected value: `Parse(%q) = %v, want %v`.
-* Test every edge case in the plan: empty input, input exactly at and one byte over each limit, malformed and truncated data, unknown versions, Unicode and cancellation.
+* Test every edge case in the plan: empty and nil input, zero and negative values, input exactly at and one byte over each limit, malformed and truncated data, unknown versions, Unicode and cancellation.
 * Every renderer has golden files, updated with `go test ./... -update` only when output changes on purpose.
 * CLI tests run the command in-process with injected streams, and check stdout, stderr and the exit code.
 * Use hand-written fakes, not mocking frameworks: one error field per method, and `httptest` for the GitHub API.
