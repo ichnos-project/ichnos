@@ -93,7 +93,7 @@ Code follows the [Coding Conventions](docs/coding-conventions.md).
 
 Each audit rule needs:
 
-1. A permanent ID in lowercase kebab-case, such as `shared-cache-target`. Rule IDs are never reused or renamed.
+1. A permanent ID in lowercase kebab-case, such as `shared-cache-target`. Rule IDs are never reused, and a renamed rule keeps its old ID as an alias.
 2. Evidence: a rule may only fire on facts from the build record, the CI configuration, the Dockerfile or the CI provider's API.
 3. A documentation page that explains the problem, shows the fix and links to the upstream issues that justify the rule.
 4. Tests for at least one case where the rule fires and one where it must not.

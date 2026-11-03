@@ -14,13 +14,13 @@ Ichnos follows [Semantic Versioning](https://semver.org/):
 * **Minor (x.Y.0):** New functionality, backwards compatible
 * **Patch (x.y.Z):** Bug fixes, backwards compatible
 
-The CLI, the configuration file and the report format are the project's API. Until v1.0, a minor release may include breaking changes, and each one is listed in the release notes.
+The CLI, the configuration file, the snapshot and report formats and the audit rule IDs are the project's API. Until v1.0, a minor release may include breaking changes, and each one is listed in the release notes.
 
 ### Deprecation Policy
 
 * A deprecated configuration or report field produces a warning, and is removed no earlier than two minor releases or six months later, whichever is later.
 * A deprecated CLI flag remains for at least two minor releases.
-* Audit rule IDs are never reused or renamed.
+* Audit rule IDs are never reused, and a renamed rule keeps its old ID as an alias.
 
 ## Release Types
 

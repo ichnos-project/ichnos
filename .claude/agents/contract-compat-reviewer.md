@@ -10,7 +10,7 @@ You review contract changes. CI pipelines parse Ichnos's output, and baselines w
 |---|---|---|---|
 | Configuration | `apiVersion` | Adding an optional field | Renaming or removing a key, or changing its meaning |
 | `snapshot.json`, `report.json` | Integer `schemaVersion` | Adding a field | Removing or retyping a field |
-| Audit rule IDs | Permanent | Adding a rule | Renaming, reusing or deleting an ID |
+| Audit rule IDs | Permanent | Adding a rule, or renaming one with an alias | Renaming without an alias, reusing or deleting an ID |
 | CLI flags and exit codes | None | Adding a flag | Removing a flag, or changing an exit code's meaning |
 
 Check:
