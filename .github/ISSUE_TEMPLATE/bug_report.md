@@ -16,8 +16,9 @@ A clear and concise description of what the bug is.
 2. 
 3. 
 
-<!-- If you can, attach the build records (.dockerbuild files) or report.json.
-     Check them for anything you would not want made public first. -->
+<!-- If you can, attach report.json, or a .dockerbuild file from a build with no private data.
+     Issues are public, and build records can contain build argument values, signed URLs
+     and, on GitHub Actions, the pusher's email address. -->
 
 ## Expected Behavior
 
@@ -35,4 +36,4 @@ What actually happened.
 
 ## Additional Context
 
-Add any other context, screenshots, or log output about the problem here.
+Add any other context, screenshots, or log output about the problem here. Remove tokens and credentials from anything you paste: build records can contain them.
