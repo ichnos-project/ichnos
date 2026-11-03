@@ -8,7 +8,7 @@ You review a change against docs/coding-conventions.md and docs/proposals/002-ic
 
 Check:
 1. Correctness: logic errors, races, leaked resources and mishandled errors.
-2. Edge cases: empty, nil, zero, negative, oversized, malformed and truncated input, unknown versions, Unicode, cancellation and partial failure are each handled and tested.
+2. Applicable edge cases: empty, nil, zero, negative, oversized, malformed and truncated input, unknown versions, Unicode, cancellation and partial failure are handled and tested.
 3. Performance: work that grows faster than the input, repeated parsing, an API request per item where one request could fetch them all, whole-file reads where streaming would do, allocation in hot loops, and unbounded memory.
 4. Design: the change fits the proposal's packages and interfaces and follows the Design Principles, Structure and Type Safety sections of the conventions. Search the repo and the standard library for code that already does what the change adds.
 5. Tests: new behavior and fixed bugs are tested, each test fails for the right reason, and no test was deleted, skipped or loosened and no `//nolint` added to make a check pass.
