@@ -117,7 +117,7 @@ internal/
 schemas/                          generated JSON Schemas for config, snapshot and report
 testdata/                         recorded build records by BuildKit version and scenario
 lab/                              scenario lab: fixture builds that break the cache on purpose
-hack/                             tools, with a separate go.mod
+hack/                             development scripts
 ```
 
 ### Core interfaces

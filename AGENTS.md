@@ -12,7 +12,7 @@ This file tells AI coding agents how to work in Ichnos. It complements [CONTRIBU
 
 ## Project Overview
 
-Ichnos explains why a container build missed its cache, by comparing a pull request's BuildKit build record with the base branch's. Its design is in [docs/proposals/002-ichnos-architecture.md](docs/proposals/002-ichnos-architecture.md). The project is in early design: the code of Ichnos itself has not landed yet, and `hack/tools` holds the Go code of the Claude Code hook.
+Ichnos explains why a container build missed its cache, by comparing a pull request's BuildKit build record with the base branch's. Its design is in [docs/proposals/002-ichnos-architecture.md](docs/proposals/002-ichnos-architecture.md). The project is in early design: its first code, in `internal/collect`, reads build records and redacts them, and there is no command yet.
 
 ## Before You Write Code
 

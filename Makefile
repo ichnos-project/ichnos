@@ -1,12 +1,18 @@
 .PHONY: test fuzz lint
 
 test:
-	cd hack/tools && go test -race ./...
+	go test -race ./...
 	hack/check-pr-title-test.sh
 	lab/gha/reduce-record-test.sh
 
 fuzz:
-	cd hack/tools && go test -run '^$$' -fuzz '^FuzzCheck$$' -fuzztime 50000x ./internal/gitguard
+	go test -run '^$$' -fuzz '^FuzzReadArchive$$' -fuzztime 50000x ./internal/collect
+	go test -run '^$$' -fuzz '^FuzzReadStatus$$' -fuzztime 50000x ./internal/collect
+	go test -run '^$$' -fuzz '^FuzzDecodeRecord$$' -fuzztime 50000x ./internal/collect
+	go test -run '^$$' -fuzz '^FuzzRedactText$$' -fuzztime 50000x ./internal/collect
+	go test -run '^$$' -fuzz '^FuzzRedactOp$$' -fuzztime 50000x ./internal/collect
+	go test -run '^$$' -fuzz '^FuzzKnownSet$$' -fuzztime 50000x ./internal/collect
+	go test -run '^$$' -fuzz '^FuzzScrub$$' -fuzztime 50000x ./internal/collect
 
 lint:
-	cd hack/tools && golangci-lint run ./...
+	golangci-lint run ./...

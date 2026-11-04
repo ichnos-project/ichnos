@@ -61,28 +61,5 @@
       "Edit(/CHANGELOG.md)",
       "Edit(/schemas/**)"
     ]
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "go build -C \"$CLAUDE_PROJECT_DIR/hack/tools\" -o \"$CLAUDE_PROJECT_DIR/bin/claude-hook.$$\" ./cmd/claude-hook 1>&2 && mv -f \"$CLAUDE_PROJECT_DIR/bin/claude-hook.$$\" \"$CLAUDE_PROJECT_DIR/bin/claude-hook\""
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/bin/claude-hook\""
-          }
-        ]
-      }
-    ]
   }
 }
