@@ -66,7 +66,7 @@ Larger changes, such as changes to the configuration or report schemas, new comm
 
 You will need:
 
-* Go 1.26 or later
+* Go 1.27 or later
 * `make`
 * [golangci-lint](https://golangci-lint.run/), for `make lint`
 
@@ -76,7 +76,7 @@ You will need:
 | `make fuzz` | Run each fuzz test for a fixed number of inputs, as CI does |
 | `make lint` | Run `golangci-lint` |
 
-The code of Ichnos itself has not landed yet. `make build`, `make test-e2e` and `make generate` arrive with it, and the end-to-end tests will need Docker with Buildx or a BuildKit daemon.
+Ichnos has no command yet. `make build`, `make test-e2e` and `make generate` arrive with it, and the end-to-end tests will need Docker with Buildx or a BuildKit daemon.
 
 Generated files are committed. Regenerate the artwork with `python3 hack/artwork/generate.py` instead of editing it.
 

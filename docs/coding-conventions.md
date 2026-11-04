@@ -82,10 +82,11 @@ Build records, snapshots, reports, configuration files, CI events and API respon
 
 * Check every input against an allowlist, and reject anything else.
 * Read at most `limit+1` bytes through `io.LimitReader` against one budget for the whole input, and return a typed error when it is exceeded. Never trust a declared size, and cap counts of steps, files and findings.
-* Accept only regular files: open the path, then `Stat` the opened file, so a pipe or device cannot hang a run.
+* Accept only regular files: open the path without blocking (`O_NONBLOCK` on Unix), then `Stat` the opened file, so a pipe or device cannot hang a run.
 * Read the version of a versioned file first, decode strictly with the matching type (unknown fields and trailing data are errors), validate it, and convert it to the one internal type. Reject unknown versions. BuildKit records are third-party, so decode them tolerantly and validate only the fields Ichnos uses.
 * Open files under a directory through `os.Root`, check names taken from data with `filepath.IsLocal`, and reject a symlinked configuration file. Never check a path and then open it separately.
 * Read an archive with one size budget shared by all entries, and reject symlinks, unsupported entry types and size mismatches.
+* Never decode untrusted JSON into `map[string]any`, `[]any`, or a slice or map of any type without a limit on its length: decoded that way, a value can take about 70 times its size in memory. Read it as a stream with `encoding/json/jsontext`, and check each limit before keeping another element.
 * Escape text for where it goes, in one package per destination. Markdown: put untrusted text in code spans fenced by more backticks than it contains, and neutralize `@` mentions. Terminal: strip control and bidirectional characters. GitHub workflow commands: escape them, and cap annotations and summary size.
 * Give every parser of untrusted input a fuzz test, seeded from `testdata/`, that checks properties rather than only the absence of a panic.
 
