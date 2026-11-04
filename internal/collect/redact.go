@@ -1179,7 +1179,8 @@ func markUserPassword(s string, start, end int, m *mask) {
 				closing++
 			}
 			if closing >= end {
-				break
+				m.mark(start, end)
+				return
 			}
 			m.mark(i+1, closing)
 			m.mark(closing+1, end)

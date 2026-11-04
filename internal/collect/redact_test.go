@@ -828,6 +828,7 @@ func TestRedactTimeIsLinear(t *testing.T) {
 		{"labels that are not credentials", func(n int) string { return strings.Repeat("ab: ", n/4) }},
 		{"one long name before many labels", func(n int) string { return strings.Repeat("a", n/2) + strings.Repeat(" :", n/4) }},
 		{"options that are not credentials", func(n int) string { return strings.Repeat(" -a b", n/5) }},
+		{"a user:password whose quote does not close", func(n int) string { return "curl -u\"" + strings.Repeat("a:", n/2) }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			small, large := tt.text(maxStringBytes/16-64), tt.text(maxStringBytes-64)
