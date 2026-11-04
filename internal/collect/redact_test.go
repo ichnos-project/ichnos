@@ -384,6 +384,43 @@ func TestPlantedSecrets(t *testing.T) {
 				"data": base64.StdEncoding.EncodeToString([]byte("//registry.npmjs.org/:token-from-argument " + v + "\n")),
 			}})
 		}},
+		{"provenance args with a header", true, func(b *bundle, v string) {
+			b.editOps("exec", func(op map[string]any) {
+				child(op, "meta")["args"] = []any{"/bin/sh", "-c", `curl -H "Authorization: Bearer ` + v + `" https://api.example/`}
+			})
+		}},
+		{"provenance args with an option", true, func(b *bundle, v string) {
+			b.editOps("exec", func(op map[string]any) {
+				child(op, "meta")["args"] = []any{"docker", "login", "-u", "ci", "--password", v, "registry.example"}
+			})
+		}},
+		{"provenance args with a password option in a command", true, func(b *bundle, v string) {
+			b.editOps("exec", func(op map[string]any) {
+				child(op, "meta")["args"] = []any{"/bin/sh", "-c", "docker login -u ci --password " + v + " registry.example"}
+			})
+		}},
+		{"provenance args with curl -u", true, func(b *bundle, v string) {
+			b.editOps("exec", func(op map[string]any) {
+				child(op, "meta")["args"] = []any{"/bin/sh", "-c", "curl -u ci:" + v + " -o f https://repo.example/f"}
+			})
+		}},
+		{"provenance heredoc with YAML", true, func(b *bundle, v string) {
+			b.addFileAction(map[string]any{"mkfile": map[string]any{
+				"path": "/app/config.yaml", "mode": 384,
+				"data": base64.StdEncoding.EncodeToString([]byte("db:\n  user: app\n  password: " + v + "\n")),
+			}})
+		}},
+		{"provenance heredoc with INI", true, func(b *bundle, v string) {
+			b.addFileAction(map[string]any{"mkfile": map[string]any{
+				"path": "/root/.pypirc", "mode": 384,
+				"data": base64.StdEncoding.EncodeToString([]byte("[pypi]\nusername = __token__\npassword = " + v + "\n")),
+			}})
+		}},
+		{"provenance Dockerfile text with a header", true, func(b *bundle, v string) {
+			b.editDockerfile(func(s string) string {
+				return strings.Replace(s, "RUN wc -c", `RUN curl -H 'PRIVATE-TOKEN: `+v+`' https://gitlab.example/ && wc -c`, 1)
+			})
+		}},
 		{"provenance heredoc with an assignment", true, func(b *bundle, v string) {
 			b.addFileAction(map[string]any{"mkfile": map[string]any{
 				"path": "/run.sh", "mode": 493,
@@ -788,6 +825,9 @@ func TestRedactTimeIsLinear(t *testing.T) {
 		{"rule mark across the known values", func(n int) string { return "TOKEN=" + strings.Repeat("abcdX", n/5) }},
 		{"URLs whose port is not a number, with no @", func(n int) string { return strings.Repeat("a://x:y/", n/8) }},
 		{"URLs that start with a scheme, with no @", func(n int) string { return strings.Repeat("a://", n/4) }},
+		{"labels that are not credentials", func(n int) string { return strings.Repeat("ab: ", n/4) }},
+		{"one long name before many labels", func(n int) string { return strings.Repeat("a", n/2) + strings.Repeat(" :", n/4) }},
+		{"options that are not credentials", func(n int) string { return strings.Repeat(" -a b", n/5) }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			small, large := tt.text(maxStringBytes/16-64), tt.text(maxStringBytes-64)
@@ -799,10 +839,11 @@ func TestRedactTimeIsLinear(t *testing.T) {
 }
 
 // naiveScrub is the reference for scrubber.scrub. It marks every byte that
-// an occurrence of a known value covers, the bytes that the rules mark in x,
-// and, when x holds a known value, the bytes of x behind those that the
-// rules mark in x with the known values replaced, and then with every
-// marked byte replaced.
+// an occurrence of a known value covers; when there is one, the bytes of x
+// behind those that the rules mark in x with the known values replaced; the
+// bytes that the rules mark in x; and then, while that marks more, at most
+// maxRereads times, the bytes behind those that the rules mark in x with
+// every marked byte replaced.
 func naiveScrub(known []string, x string, r ruleSet) (string, bool) {
 	covered := naiveCover(known, x)
 	hasKnown := slices.Contains(covered, true)
@@ -814,15 +855,18 @@ func naiveScrub(known []string, x string, r ruleSet) (string, bool) {
 	for i := range len(x) {
 		covered[i] = covered[i] || mx.next(i, true) == i
 	}
-	if hasKnown {
-		naiveReread(x, covered, r)
+	for range maxRereads {
+		if !slices.Contains(covered, true) || !naiveReread(x, covered, r) {
+			break
+		}
 	}
 	return naiveApply(x, covered), hit
 }
 
 // naiveReread marks the bytes of x behind those that the rules mark in x
-// with each run of covered bytes replaced.
-func naiveReread(x string, covered []bool, r ruleSet) {
+// with each run of covered bytes replaced, and reports whether it marked
+// any that were not covered.
+func naiveReread(x string, covered []bool, r ruleSet) bool {
 	var y []byte
 	// origin holds the bytes of x behind each byte of y.
 	var origin [][2]int
@@ -845,13 +889,16 @@ func naiveReread(x string, covered []bool, r ruleSet) {
 	}
 	my := mask{n: len(y)}
 	r.mark(string(y), &my)
+	added := false
 	for k, o := range origin {
 		if my.next(k, true) == k {
 			for i := o[0]; i < o[1]; i++ {
+				added = added || !covered[i]
 				covered[i] = true
 			}
 		}
 	}
+	return added
 }
 
 func FuzzScrub(f *testing.F) {
@@ -864,6 +911,7 @@ func FuzzScrub(f *testing.F) {
 	f.Add("1#xy", "", "://?00&1#xy", uint8(stringRules))
 	f.Add("00=1", "", "?000=1=", uint8(proxyRules))
 	f.Add("00??", "", "00??&@", uint8(proxyRules))
+	f.Add("", "", "?TOKEN:=", uint8(proxyRules))
 	f.Add("0000", "", "0://0://0://0@0", uint8(textRules))
 	f.Add("abcd", "cdef", "ENV API_TOKEN abcdef ghij", uint8(textRules))
 	f.Fuzz(func(t *testing.T, k1, k2, x string, kind uint8) {
@@ -1018,6 +1066,24 @@ func TestRedactText(t *testing.T) {
 		{"ARG API_TOKEN=abcd", "ARG API_TOKEN=***", true},
 		{"RUN <<EOF\nexport API_TOKEN=abcd\necho hi\nEOF", "RUN <<EOF\nexport API_TOKEN=***\necho hi\nEOF", true},
 		{"RUN curl --password=abcd https://x", "RUN curl --password=*** https://x", true},
+		{`RUN curl -H "Authorization: Bearer abcd" https://x`, `RUN curl -H "Authorization: ***" https://x`, true},
+		{`RUN curl --header 'PRIVATE-TOKEN: abcd' https://x`, `RUN curl --header 'PRIVATE-TOKEN: ***' https://x`, true},
+		{"RUN curl -H Authorization:abcd https://x", "RUN curl -H Authorization:*** https://x", true},
+		{"password: abcd\nuser: app", "password: ***\nuser: app", true},
+		{"  - token:   abcd efgh\n", "  - token:   ***\n", true},
+		{"[pypi]\npassword = abcd\nusername = u", "[pypi]\npassword = ***\nusername = u", true},
+		{`{"password": "ab cd", "user": "u"}`, `{"password": "***", "user": "u"}`, true},
+		{`password: ""`, `password: ""`, true},
+		{`RUN echo password": abcd`, `RUN echo password": ***`, true},
+		{"RUN docker login -u ci --password abcd registry.example", "RUN docker login -u ci --password *** registry.example", true},
+		{"RUN tool --api-key \"ab cd\" --verbose", "RUN tool --api-key *** --verbose", true},
+		{"RUN tool --password --verbose", "RUN tool --password --verbose", false},
+		{"RUN curl -u ci:abcd https://x", "RUN curl -u ci:*** https://x", true},
+		{"RUN curl --user ci:abcd https://x", "RUN curl --user ci:*** https://x", true},
+		{"RUN useradd -u 1000 app && pip install --user requests", "RUN useradd -u 1000 app && pip install --user requests", false},
+		{"RUN echo user: app && mkdir -p /a && docker run -p 8080:80 x", "RUN echo user: app && mkdir -p /a && docker run -p 8080:80 x", false},
+		{"LABEL url=https://h.example:8443/x", "LABEL url=https://h.example:8443/x", false},
+		{"RUN git clone https://x-access-token:abcd@github.com/o/r.git", "RUN git clone https://***@github.com/o/r.git", true},
 		{"RUN X=TOKEN=abcd make", "RUN X=TOKEN=*** make", true},
 		{"ADD https://u:p@example.com/f.tgz /", "ADD https://***@example.com/f.tgz /", true},
 		{"FROM alpine:3.22@sha256:" + hex64('a'), "FROM alpine:3.22@sha256:" + hex64('a'), false},
@@ -1254,6 +1320,28 @@ func TestRedactProxies(t *testing.T) {
 	}
 	if !got.builds[0].steps[0].withheld {
 		t.Error("step with a proxy password is not withheld")
+	}
+}
+
+// TestRedactExecArgs checks that an argument after an option that takes a
+// credential is redacted, when the two are separate arguments.
+func TestRedactExecArgs(t *testing.T) {
+	tests := []struct {
+		args     []any
+		want     []any
+		withheld bool
+	}{
+		{[]any{"docker", "login", "--password", "ab cd", "registry.example"}, []any{"docker", "login", "--password", "***", "registry.example"}, true},
+		{[]any{"curl", "-u", "ci:abcd", "https://x.example/"}, []any{"curl", "-u", "ci:***", "https://x.example/"}, true},
+		{[]any{"curl", "-u", "ci", "https://x.example/"}, []any{"curl", "-u", "ci", "https://x.example/"}, false},
+		{[]any{"tool", "--password", "--verbose"}, []any{"tool", "--password", "--verbose"}, false},
+		{[]any{"tool", "--password", json.Number("1"), "abcd"}, []any{"tool", "--password", json.Number("1"), "abcd"}, false},
+	}
+	for _, tt := range tests {
+		st := mustRedact(t, recordWith(t, nil, map[string]any{"Op": map[string]any{"exec": map[string]any{"meta": map[string]any{"args": tt.args}}}})).builds[0].steps[0]
+		if got := dig(t, opTree(t, st.op), "Op", "exec", "meta", "args"); !reflect.DeepEqual(got, tt.want) || st.withheld != tt.withheld {
+			t.Errorf("args %q = %q, withheld %v, want %q, %v", tt.args, got, st.withheld, tt.want, tt.withheld)
+		}
 	}
 }
 
@@ -1652,6 +1740,8 @@ func FuzzRedactText(f *testing.F) {
 	f.Add("", "TOKEN", "p@ss/word", "")
 	f.Add("", "TOKEN", "1234/x", "")
 	f.Add("", "TOKEN", "/DEF+ghi", "")
+	f.Add("RUN curl -H ", "Authorization", "Bearer", "")
+	f.Add("  ", "password", "hunter2", "\nuser: app")
 	f.Add("://0://0://", "@", "0", "0")
 	f.Fuzz(func(t *testing.T, prefix, name, value, suffix string) {
 		text := prefix + name + "=" + value + suffix
@@ -1662,6 +1752,7 @@ func FuzzRedactText(f *testing.F) {
 			t.Fatalf("text(%q) = %q, then %q", text, once, twice)
 		}
 		checkURLPassword(t, prefix, value, suffix)
+		checkLabeledValue(t, prefix, name, value, suffix)
 		checkProxyPassword(t, value)
 		checkURLToken(t, value)
 		checkKnownValue(t, prefix, value, suffix)
@@ -1815,6 +1906,32 @@ func checkURLPassword(t *testing.T, prefix, password, suffix string) {
 		var withheld bool
 		if got := (scrubber{}).text(text, &withheld); strings.Contains(got, password) || strings.Contains(got, urlUser) || !withheld {
 			t.Errorf("text(%q) = %q, %v, which keeps the user information", text, got, withheld)
+		}
+	}
+}
+
+// checkLabeledValue checks that the value of a credential never survives
+// when a colon, a spaced equals sign or an option labels it, as in a
+// header, YAML, INI or a command line.
+func checkLabeledValue(t *testing.T, prefix, name, value, suffix string) {
+	t.Helper()
+	if !isCredentialName(name) || !validName(name) || value == "" || value[0] == '-' ||
+		strings.ContainsAny(value, "\"'\\*") || strings.IndexFunc(value, func(r rune) bool { return r <= ' ' || r == 0x7f }) >= 0 ||
+		prefix != "" && !strings.ContainsRune(" \t\r\n", rune(prefix[len(prefix)-1])) || strings.Contains(prefix+name+suffix, value) {
+		return
+	}
+	for _, text := range []string{
+		prefix + name + ": " + value + "\n" + suffix,
+		prefix + name + " = " + value + "\n" + suffix,
+		prefix + `"` + name + `: ` + value + `"` + suffix,
+		prefix + "--" + name + " " + value + " " + suffix,
+	} {
+		if strings.Count(text, value) != 1 {
+			continue
+		}
+		var withheld bool
+		if got := (scrubber{}).text(text, &withheld); strings.Contains(got, value) || !withheld {
+			t.Errorf("text(%q) = %q, %v, which keeps the value %q", text, got, withheld, value)
 		}
 	}
 }

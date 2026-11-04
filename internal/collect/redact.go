@@ -549,6 +549,8 @@ func (w *opRedactor) member(parent, k string) error {
 		return nil
 	case parent == "mkfile" && k == "data" && isString:
 		return w.string(func(x string) string { return w.s.encoded(x, w.withheld) })
+	case k == "args" && w.j.peek() == jsontext.KindBeginArray:
+		return w.args()
 	case k == "env" && w.j.peek() == jsontext.KindBeginArray:
 		return w.env()
 	case isProxyName(k) && isString:
@@ -556,6 +558,51 @@ func (w *opRedactor) member(parent, k string) error {
 	default:
 		return w.value(k)
 	}
+}
+
+// args reads the arguments of a command. An argument after an option that
+// takes a credential, as in "--password", "x", is redacted as that
+// credential, because the rules see one argument at a time.
+func (w *opRedactor) args() error {
+	if err := w.j.next(); err != nil {
+		return err
+	}
+	prev := ""
+	for w.j.peek() != jsontext.KindEndArray {
+		if w.j.peek() != jsontext.KindString {
+			prev = ""
+			if err := w.value("args"); err != nil {
+				return err
+			}
+			continue
+		}
+		option := prev
+		err := w.string(func(x string) string {
+			prev = x
+			return w.s.arg(option, x, w.withheld)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return w.j.next()
+}
+
+// arg redacts one argument of a command, given the argument before it.
+func (s scrubber) arg(option, x string, withheld *bool) string {
+	whole, afterColon := credentialOption(option)
+	switch {
+	case x == "" || x[0] == '-':
+	case whole:
+		*withheld = true
+		return withheldValue
+	case afterColon:
+		if user, _, ok := strings.Cut(x, ":"); ok {
+			*withheld = true
+			return s.str(user, withheld) + ":" + withheldValue
+		}
+	}
+	return s.str(x, withheld)
 }
 
 // env reads a list of NAME=VALUE entries. It withholds the value of each
@@ -667,12 +714,12 @@ func (s scrubber) text(x string, withheld *bool) string {
 //
 // When x holds a known value, the rules also read it with the known values
 // replaced, because a value that BuildKit expanded into x can split what
-// they look for, as a password holding a / splits a URL. If they then mark
-// more in x itself, they read the result once more: a mark that joins a
-// known value can take a separator with it, as the = of a query parameter,
-// so that what is left reads differently. Once is enough, and so is none
-// when they mark nothing more: the rules mark whole values between the
-// separators they read, and replacing those changes nothing that they read.
+// they look for, as a password holding a / splits a URL. Then they read the
+// result while that marks more, at most maxRereads times: what one rule or
+// known value removes can take a separator that another rule reads, as a
+// header's value can take the = of a query parameter, so that what is left
+// reads differently. A reading only adds marks, so the cap bounds the time
+// and never lets a value through.
 //
 // A known value that holds a quote can make one reading take the rest of x
 // as quoted, and so remove it. The rules cannot tell a quote in an expanded
@@ -685,21 +732,25 @@ func (s scrubber) scrub(x string, withheld *bool, r ruleSet) string {
 	}
 	m := mask{n: len(x)}
 	known := s.known != nil && s.known.mark(x, &m)
-	marked := 0
 	if known {
 		m.markApplied(x, r)
-		marked = m.count()
 	}
 	hit := r.mark(x, &m) || known
-	if known && m.count() > marked {
-		m.markApplied(x, r)
+	for range maxRereads {
+		if m.bits == nil || !m.markApplied(x, r) {
+			break
+		}
 	}
 	*withheld = *withheld || hit
 	return m.apply(x)
 }
 
+// maxRereads bounds how often scrub reads its result again. Fuzzing found no
+// string that needed more than one reading.
+const maxRereads = 3
+
 // ruleSet names the rules for one kind of string. Every kind has the rules
-// for assignments and URLs.
+// for assignments, labels, options and URLs.
 type ruleSet int
 
 const (
@@ -716,6 +767,8 @@ const (
 // mark marks what the rules remove from x, and reports whether any applied.
 func (r ruleSet) mark(x string, m *mask) bool {
 	hit := markAssignments(x, m)
+	hit = markLabels(x, m) || hit
+	hit = markOptions(x, m) || hit
 	hit = markURLs(x, m) || hit
 	switch r {
 	case stringRules:
@@ -774,15 +827,6 @@ func (m *mask) next(i int, marked bool) int {
 	return m.n
 }
 
-// count returns the number of marked bytes.
-func (m *mask) count() int {
-	n := 0
-	for _, w := range m.bits {
-		n += bits.OnesCount64(w)
-	}
-	return n
-}
-
 // apply returns x with each run of marked bytes replaced by withheldValue.
 func (m *mask) apply(x string) string {
 	if m.bits == nil {
@@ -803,19 +847,21 @@ func (m *mask) apply(x string) string {
 }
 
 // markApplied marks the bytes of x behind those that the rules mark in
-// m.apply(x).
-func (m *mask) markApplied(x string, r ruleSet) {
+// m.apply(x), and reports whether it marked any that m did not.
+func (m *mask) markApplied(x string, r ruleSet) bool {
 	y := m.apply(x)
 	my := mask{n: len(y)}
 	r.mark(y, &my)
-	m.markReplaced(x, &my)
+	return m.markReplaced(x, &my)
 }
 
 // markReplaced marks the bytes of x behind those that my marks in
-// m.apply(x). It reads m as apply did, and marks only bytes it has passed,
-// so it must come before any other mark is added to m. It finds each run of
-// m and of my once, so its time is linear in the length of x.
-func (m *mask) markReplaced(x string, my *mask) {
+// m.apply(x), and reports whether it marked any that m did not. It reads m
+// as apply did, and marks only bytes it has passed, so it must come before
+// any other mark is added to m. It finds each run of m and of my once, so
+// its time is linear in the length of x.
+func (m *mask) markReplaced(x string, my *mask) bool {
+	added := false
 	// [k, kEnd) is the next run that my marks.
 	k := my.next(0, true)
 	kEnd := my.next(k, false)
@@ -827,6 +873,7 @@ func (m *mask) markReplaced(x string, my *mask) {
 		for k < end {
 			if lo, hi := max(k, j), min(kEnd, end); lo < hi {
 				m.mark(lo+i-j, hi+i-j)
+				added = true
 			}
 			if kEnd > end {
 				break
@@ -835,11 +882,12 @@ func (m *mask) markReplaced(x string, my *mask) {
 			kEnd = my.next(k, false)
 		}
 		if run == len(x) {
-			return
+			return added
 		}
 		j = end + len(withheldValue)
 		i = m.next(run, false)
 	}
+	return added
 }
 
 // isCredentialName reports whether a name looks like it holds a credential.
@@ -975,6 +1023,132 @@ func markAssignments(s string, m *mask) bool {
 	}
 	return matched
 }
+
+// markLabels marks the value after a credential name that a colon labels,
+// or an equals sign with white space before it, as in the header
+// "Authorization: Bearer x", the YAML "password: x" or the INI
+// "password = x". NAME=VALUE with nothing between is markAssignments', and a
+// name right after :// is a URL's user name, which markURLs reads. A quoted
+// value loses what is inside its quotes; one inside the quoted string that
+// the label starts, as in -H "Authorization: x", ends with that string; one
+// after white space runs to the end of the line, as YAML and INI values do;
+// and any other ends at white space.
+func markLabels(s string, m *mask) bool {
+	matched := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != ':' && c != '=' || strings.HasPrefix(s[i:], "://") {
+			continue
+		}
+		k := i
+		for k > 0 && (s[k-1] == ' ' || s[k-1] == '\t') {
+			k--
+		}
+		if c == '=' && k == i {
+			continue
+		}
+		var keyQuote byte
+		if k > 0 && isQuote(s[k-1]) {
+			keyQuote = s[k-1]
+			k--
+		}
+		j := k
+		for j > 0 && isNameByte(s[j-1]) {
+			j--
+		}
+		switch {
+		case j == k || !isCredentialName(s[j:k]):
+			continue
+		case strings.HasSuffix(s[:j], "://"):
+			continue
+		}
+		matched = true
+		start := i + 1
+		for start < len(s) && (s[start] == ' ' || s[start] == '\t') {
+			start++
+		}
+		var end int
+		switch {
+		case start < len(s) && isQuote(s[start]):
+			end = quoteEnd(s, start)
+			if end > start+1 && s[end-1] == s[start] {
+				end--
+			}
+			start++
+		case keyQuote == 0 && j > 0 && isQuote(s[j-1]):
+			end = quoteEnd(s, j-1)
+			if end > start && s[end-1] == s[j-1] {
+				end--
+			}
+		case start > i+1:
+			end = start
+			for end < len(s) && s[end] != '\n' && s[end] != '\r' {
+				end++
+			}
+		default:
+			end = valueEnd(s, start)
+		}
+		m.mark(start, end)
+		i = max(i, end-1)
+	}
+	return matched
+}
+
+// markOptions marks the value of a command-line option that takes a
+// credential, as credentialOption tells, when white space separates them.
+// A value that starts with - is the next option, so the option took none.
+func markOptions(s string, m *mask) bool {
+	matched := false
+	for i := 0; i < len(s); i++ {
+		if s[i] != '-' || i > 0 && !isSpace(s[i-1]) {
+			continue
+		}
+		k := i
+		for k < len(s) && isNameByte(s[k]) {
+			k++
+		}
+		whole, afterColon := credentialOption(s[i:k])
+		start := skipSpace(s, k)
+		if !whole && !afterColon || start == k || start == len(s) || s[start] == '-' {
+			i = k - 1
+			continue
+		}
+		end := valueEnd(s, start)
+		if afterColon {
+			n := strings.IndexByte(s[start:end], ':')
+			if n < 0 {
+				i = k - 1
+				continue
+			}
+			start += n + 1
+		}
+		m.mark(start, end)
+		matched = true
+		i = end - 1
+	}
+	return matched
+}
+
+// credentialOption reports how an option takes a credential as its value:
+// whole, after an option whose name looks like a credential, as in
+// --password x, or after the colon, as curl and wget take user:password
+// after -u and --user.
+func credentialOption(option string) (whole, afterColon bool) {
+	if option == "-u" || option == "--user" {
+		return false, true
+	}
+	name, ok := strings.CutPrefix(option, "--")
+	for i := range len(name) {
+		if !isNameByte(name[i]) {
+			return false, false
+		}
+	}
+	return ok && name != "" && isCredentialName(name), false
+}
+
+func isQuote(c byte) bool { return c == '"' || c == '\'' }
+
+func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
 
 func valueEnd(s string, i int) int {
 	for i < len(s) {
