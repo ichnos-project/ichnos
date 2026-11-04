@@ -843,7 +843,8 @@ func TestRedactTimeIsLinear(t *testing.T) {
 // behind those that the rules mark in x with the known values replaced; the
 // bytes that the rules mark in x; and then, while that marks more, at most
 // maxRereads times, the bytes behind those that the rules mark in x with
-// every marked byte replaced.
+// every marked byte replaced. If the last reading still marked more, it
+// withholds x whole.
 func naiveScrub(known []string, x string, r ruleSet) (string, bool) {
 	covered := naiveCover(known, x)
 	hasKnown := slices.Contains(covered, true)
@@ -855,10 +856,12 @@ func naiveScrub(known []string, x string, r ruleSet) (string, bool) {
 	for i := range len(x) {
 		covered[i] = covered[i] || mx.next(i, true) == i
 	}
-	for range maxRereads {
-		if !slices.Contains(covered, true) || !naiveReread(x, covered, r) {
-			break
-		}
+	settled := !slices.Contains(covered, true)
+	for n := 0; !settled && n < maxRereads; n++ {
+		settled = !naiveReread(x, covered, r)
+	}
+	if !settled {
+		return withheldValue, true
 	}
 	return naiveApply(x, covered), hit
 }
@@ -1080,6 +1083,17 @@ func TestRedactText(t *testing.T) {
 		{"RUN tool --password --verbose", "RUN tool --password --verbose", false},
 		{"RUN curl -u ci:abcd https://x", "RUN curl -u ci:*** https://x", true},
 		{"RUN curl --user ci:abcd https://x", "RUN curl --user ci:*** https://x", true},
+		{"RUN curl -U ci:abcd https://x", "RUN curl -U ci:*** https://x", true},
+		{"RUN curl --proxy-user ci:abcd https://x", "RUN curl --proxy-user ci:*** https://x", true},
+		{"RUN curl -uci:abcd https://x", "RUN curl -uci:*** https://x", true},
+		{"RUN curl -Ua@b.example:abcd https://x", "RUN curl -Ua@b.example:*** https://x", true},
+		{`RUN curl -u "ci:abcd" https://x`, `RUN curl -u "ci:***" https://x`, true},
+		{`RUN curl -u'ci:ab cd' https://x`, `RUN curl -u'ci:***' https://x`, true},
+		{`RUN curl -u "ci:ab"cd https://x`, `RUN curl -u "ci:***"*** https://x`, true},
+		{`RUN curl -u "ci":abcd https://x`, `RUN curl -u "ci":*** https://x`, true},
+		{`RUN curl -u "ci:a\"b" https://x`, `RUN curl -u "ci:***" https://x`, true},
+		{`RUN curl -u ci\:x:ab https://x`, `RUN curl -u ci\:x:*** https://x`, true},
+		{"RUN pip install -U requests && curl -uroot https://x", "RUN pip install -U requests && curl -uroot https://x", false},
 		{"RUN useradd -u 1000 app && pip install --user requests", "RUN useradd -u 1000 app && pip install --user requests", false},
 		{"RUN echo user: app && mkdir -p /a && docker run -p 8080:80 x", "RUN echo user: app && mkdir -p /a && docker run -p 8080:80 x", false},
 		{"LABEL url=https://h.example:8443/x", "LABEL url=https://h.example:8443/x", false},
@@ -1323,6 +1337,48 @@ func TestRedactProxies(t *testing.T) {
 	}
 }
 
+// TestRedactWithholdsUnsettledString checks that a string whose marks do
+// not settle within the rereads allowed is withheld whole.
+func TestRedactWithholdsUnsettledString(t *testing.T) {
+	const x = "?TOKEN:="
+	for _, tt := range []struct {
+		rereads int
+		want    string
+	}{
+		{0, withheldValue},
+		{1, withheldValue},
+		{2, "?***"},
+		{maxRereads, "?***"},
+	} {
+		var withheld bool
+		if got := (scrubber{}).scrubWithin(x, &withheld, proxyRules, tt.rereads); got != tt.want || !withheld {
+			t.Errorf("scrubWithin(%q) with %d rereads = %q, %v, want %q, true", x, tt.rereads, got, withheld, tt.want)
+		}
+	}
+}
+
+// TestRedactUserWithheldWhole checks that a user:password value that cannot
+// be split safely is withheld whole, and stays so: one whose quote does not
+// close, one with white space before its colon, and one whose only colon is
+// escaped.
+func TestRedactUserWithheldWhole(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{`RUN curl -u "ci:ab https://x`, "RUN curl -u ***"},
+		{`RUN curl -u "c i:ab" https://x`, "RUN curl -u *** https://x"},
+		{`RUN curl -u" --password x:"`, "RUN curl -u***"},
+		{`RUN curl -u ci\:ab https://x`, "RUN curl -u *** https://x"},
+	} {
+		var withheld bool
+		got := scrubber{}.text(tt.in, &withheld)
+		if got != tt.want || !withheld {
+			t.Errorf("text(%q) = %q, %v, want %q, true", tt.in, got, withheld, tt.want)
+		}
+		if again := (scrubber{}).text(got, &withheld); again != got {
+			t.Errorf("text(%q) = %q, want it unchanged", got, again)
+		}
+	}
+}
+
 // TestRedactExecArgs checks that an argument after an option that takes a
 // credential is redacted, when the two are separate arguments.
 func TestRedactExecArgs(t *testing.T) {
@@ -1334,6 +1390,8 @@ func TestRedactExecArgs(t *testing.T) {
 		{[]any{"docker", "login", "--password", "ab cd", "registry.example"}, []any{"docker", "login", "--password", "***", "registry.example"}, true},
 		{[]any{"curl", "-u", "ci:abcd", "https://x.example/"}, []any{"curl", "-u", "ci:***", "https://x.example/"}, true},
 		{[]any{"curl", "-u", "ci", "https://x.example/"}, []any{"curl", "-u", "ci", "https://x.example/"}, false},
+		{[]any{"curl", "-U", "ci:abcd", "https://x.example/"}, []any{"curl", "-U", "ci:***", "https://x.example/"}, true},
+		{[]any{"curl", "-uci:abcd", "https://x.example/"}, []any{"curl", "-uci:***", "https://x.example/"}, true},
 		{[]any{"tool", "--password", "--verbose"}, []any{"tool", "--password", "--verbose"}, false},
 		{[]any{"tool", "--password", json.Number("1"), "abcd"}, []any{"tool", "--password", json.Number("1"), "abcd"}, false},
 	}
@@ -1736,6 +1794,8 @@ func FuzzRedactText(f *testing.F) {
 	f.Add("", "TOKEN", "12/34", "")
 	f.Add("", "TOKEN", "//", "")
 	f.Add("0", "0", "//0", "")
+	f.Add("-u0\" ", "Auth", ":", "0")
+	f.Add("-u\" ", "Auth", "0", ":\"")
 	f.Add("", "TOKEN", "pa'ss", "")
 	f.Add("", "TOKEN", "p@ss/word", "")
 	f.Add("", "TOKEN", "1234/x", "")

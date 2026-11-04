@@ -718,14 +718,19 @@ func (s scrubber) text(x string, withheld *bool) string {
 // result while that marks more, at most maxRereads times: what one rule or
 // known value removes can take a separator that another rule reads, as a
 // header's value can take the = of a query parameter, so that what is left
-// reads differently. A reading only adds marks, so the cap bounds the time
-// and never lets a value through.
+// reads differently. If the last reading still marks more, x is withheld
+// whole, so the cap bounds the time and fails closed.
 //
 // A known value that holds a quote can make one reading take the rest of x
 // as quoted, and so remove it. The rules cannot tell a quote in an expanded
 // value from one that opens a quoted credential, and reading it as data
 // would leave that credential.
 func (s scrubber) scrub(x string, withheld *bool, r ruleSet) string {
+	return s.scrubWithin(x, withheld, r, maxRereads)
+}
+
+// scrubWithin is scrub with at most rereads readings of its result.
+func (s scrubber) scrubWithin(x string, withheld *bool, r ruleSet, rereads int) string {
 	if len(x) > maxStringBytes {
 		*withheld = true
 		return withheldValue
@@ -736,10 +741,13 @@ func (s scrubber) scrub(x string, withheld *bool, r ruleSet) string {
 		m.markApplied(x, r)
 	}
 	hit := r.mark(x, &m) || known
-	for range maxRereads {
-		if m.bits == nil || !m.markApplied(x, r) {
-			break
-		}
+	settled := m.bits == nil
+	for n := 0; !settled && n < rereads; n++ {
+		settled = !m.markApplied(x, r)
+	}
+	if !settled {
+		*withheld = true
+		return withheldValue
 	}
 	*withheld = *withheld || hit
 	return m.apply(x)
@@ -1107,6 +1115,16 @@ func markOptions(s string, m *mask) bool {
 		for k < len(s) && isNameByte(s[k]) {
 			k++
 		}
+		if i+2 < len(s) && (s[i+1] == 'u' || s[i+1] == 'U') && !isSpace(s[i+2]) {
+			// curl also takes -uuser:password, with no space.
+			end := valueEnd(s, i)
+			if strings.IndexByte(s[i:end], ':') >= 0 {
+				markUserPassword(s, i+2, end, m)
+				matched = true
+				i = end - 1
+				continue
+			}
+		}
 		whole, afterColon := credentialOption(s[i:k])
 		start := skipSpace(s, k)
 		if !whole && !afterColon || start == k || start == len(s) || s[start] == '-' {
@@ -1114,27 +1132,70 @@ func markOptions(s string, m *mask) bool {
 			continue
 		}
 		end := valueEnd(s, start)
-		if afterColon {
-			n := strings.IndexByte(s[start:end], ':')
-			if n < 0 {
-				i = k - 1
-				continue
-			}
-			start += n + 1
+		switch {
+		case whole:
+			m.mark(start, end)
+		case strings.IndexByte(s[start:end], ':') < 0:
+			i = k - 1
+			continue
+		default:
+			markUserPassword(s, start, end, m)
 		}
-		m.mark(start, end)
 		matched = true
 		i = end - 1
 	}
 	return matched
 }
 
+// markUserPassword marks the password in the user:password word
+// s[start:end], read as a shell reads it: everything after the first colon
+// that no backslash escapes. When that colon is inside quotes, their closing
+// quote stays, so that what is left reads as it did. The whole word goes
+// when there is no such colon, when the quotes do not close, and when white
+// space comes before the colon, because a user name with white space is
+// likelier to be quotes that took in more of the command.
+func markUserPassword(s string, start, end int, m *mask) {
+	var quote byte
+	for i := start; i < end; i++ {
+		switch c := s[i]; {
+		case c == '\\' && quote != '\'':
+			i++
+		case isSpace(c):
+			m.mark(start, end)
+			return
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote == 0 && isQuote(c):
+			quote = c
+		case c == ':' && quote == 0:
+			m.mark(i+1, end)
+			return
+		case c == ':':
+			closing := i + 1
+			for closing < end && s[closing] != quote {
+				if s[closing] == '\\' && quote == '"' {
+					closing++
+				}
+				closing++
+			}
+			if closing >= end {
+				break
+			}
+			m.mark(i+1, closing)
+			m.mark(closing+1, end)
+			return
+		}
+	}
+	m.mark(start, end)
+}
+
 // credentialOption reports how an option takes a credential as its value:
 // whole, after an option whose name looks like a credential, as in
 // --password x, or after the colon, as curl and wget take user:password
-// after -u and --user.
+// after -u and --user, and curl takes a proxy's after -U and --proxy-user.
 func credentialOption(option string) (whole, afterColon bool) {
-	if option == "-u" || option == "--user" {
+	switch option {
+	case "-u", "--user", "-U", "--proxy-user":
 		return false, true
 	}
 	name, ok := strings.CutPrefix(option, "--")
