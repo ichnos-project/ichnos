@@ -13,19 +13,33 @@ fail() {
   exit 1
 }
 
+# run_case runs a command in a subshell with set -e, as record.sh runs it, and
+# sets case_status. On the left of || the subshell would run with set -e
+# ignored, so it runs as a statement of its own.
+run_case() {
+  set +e
+  (
+    set -e
+    "$@"
+  ) >"$top/stdout" 2>"$top/stderr"
+  case_status=$?
+  set -e
+}
+
 # expect_pass runs a command in a subshell and fails if it stops.
 expect_pass() {
-  ("$@") >"$top/stdout" 2>"$top/stderr" || fail "stopped: $*: $(cat "$top/stderr")"
+  run_case "$@"
+  [ "$case_status" -eq 0 ] || fail "stopped: $*: $(cat "$top/stderr")"
   n=$((n + 1))
 }
 
 # expect_stop MESSAGE COMMAND... runs a command in a subshell and fails unless
 # it stops and, when MESSAGE is not empty, prints MESSAGE.
 expect_stop() {
-  local message=$1 status=0
+  local message=$1
   shift
-  ("$@") >"$top/stdout" 2>"$top/stderr" || status=$?
-  [ "$status" -ne 0 ] || fail "did not stop: $*"
+  run_case "$@"
+  [ "$case_status" -ne 0 ] || fail "did not stop: $*"
   if [ -n "$message" ] && ! grep -q -F -- "$message" "$top/stderr"; then
     fail "stopped for another reason: $*: $(cat "$top/stderr")"
   fi
@@ -38,14 +52,16 @@ expect_equal() {
   n=$((n + 1))
 }
 
-# craft OUT TYPE TRACE writes a record whose manifest has one layer, of media
-# type TYPE, holding TRACE.
+# craft OUT TRACE TYPE... writes a record whose manifest has a layer of each
+# media type TYPE, all holding TRACE.
 craft() {
-  local out=$1 type=$2 trace=$3 dir
+  local out=$1 trace=$2 dir
+  shift 2
   dir=$(mktemp -d "$top/craft.XXXXXX")
   mkdir -p "$dir/blobs/sha256"
   printf '%s\n' "$trace" >"$dir/blobs/sha256/$trace_hex"
-  printf '{"layers":[{"mediaType":"%s","digest":"sha256:%s"}]}\n' "$type" "$trace_hex" >"$dir/blobs/sha256/$manifest_hex"
+  jq -n -c --arg digest "sha256:$trace_hex" '{layers: [$ARGS.positional[] | {mediaType: ., digest: $digest}]}' \
+    --args "$@" >"$dir/blobs/sha256/$manifest_hex"
   printf '{"manifests":[{"digest":"sha256:%s"}]}\n' "$manifest_hex" >"$dir/index.json"
   (cd "$dir" && COPYFILE_DISABLE=1 tar -cf - index.json blobs) | gzip >"$out"
 }
@@ -111,14 +127,23 @@ registry_answers_otherwise() {
 
 top=$(mktemp -d "${TMPDIR:-/tmp}/record-test.XXXXXX")
 trap 'rm -rf "$top"' EXIT
-unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
 
 # shellcheck source=lab/record.sh
 . "$script"
+# Clear the environment as a recording does, so the fixture commits below
+# cannot land in a repository that an inherited GIT_DIR names.
+isolate_environment
 work="$top/work"
 records="$top/records"
 out="$top/out"
 mkdir "$work"
+
+# A case runs with set -e, as in a recording, so a command that fails stops it.
+fails_midway() {
+  false
+  true
+}
+expect_stop "" fails_midway
 
 # The scenario list names each recorded scenario once.
 listed=$(printf '%s\n' "${scenarios[@]}" | LC_ALL=C sort)
@@ -146,23 +171,34 @@ expect_stop "" selected failed-cache-import
 expect_stop "" selected control
 expect_stop "nope is missing from the list of scenarios" selected nope
 
-# The environment: no git or docker setting of the user's reaches a command,
-# and BuildKit fetches registry tokens itself.
-env_after=$(
-  export GIT_DIR=x GIT_WORK_TREE=x GIT_INDEX_FILE=x GIT_CONFIG_PARAMETERS="'commit.gpgsign'='true'" GIT_CONFIG_COUNT=1
-  export BUILDX_CONFIG=x DOCKER_CONTEXT=x DOCKER_HOST=tcp://example.invalid:2375
+# The environment: no variable of the user's reaches a command but PATH, HOME
+# and DOCKER_CONFIG, git reads none of the user's configuration, and BuildKit
+# fetches registry tokens itself.
+planted_environment() {
+  export GIT_DIR=x GIT_WORK_TREE=x GIT_INDEX_FILE=x GIT_COMMON_DIR=x GIT_OBJECT_DIRECTORY=x GIT_TEMPLATE_DIR=x
+  export GIT_CONFIG_PARAMETERS="'commit.gpgsign'='true'" GIT_CONFIG_COUNT=1 GIT_CONFIG_GLOBAL=/planted/gitconfig
+  export GIT_AUTHOR_NAME=planted GIT_COMMITTER_EMAIL=planted@example.invalid
+  export BUILDX_CONFIG=x BUILDX_NO_DEFAULT_ATTESTATIONS=1 BUILDKIT_PROGRESS=plain
+  export DOCKER_CONTEXT=x DOCKER_HOST=tcp://example.invalid:2375 DOCKER_DEFAULT_PLATFORM=linux/s390x
+  export SOURCE_DATE_EPOCH=0 EXPERIMENTAL_BUILDKIT_SOURCE_POLICY=/planted/policy.json
+  export HTTPS_PROXY=http://proxy.example.invalid XDG_CONFIG_HOME=/planted LANG=ar_SA.UTF-8
+  export DOCKER_CONFIG=/planted/config
   unset BUILDKIT_NO_CLIENT_TOKEN
   isolate_environment
   env
-)
-for var in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT BUILDX_CONFIG DOCKER_CONTEXT DOCKER_HOST; do
-  if printf '%s\n' "$env_after" | grep -q "^$var="; then
-    fail "isolate_environment left $var"
-  fi
-  n=$((n + 1))
-done
-printf '%s\n' "$env_after" | grep -q -x 'BUILDKIT_NO_CLIENT_TOKEN=true' || fail "isolate_environment did not export BUILDKIT_NO_CLIENT_TOKEN=true"
-n=$((n + 1))
+}
+env_after=$(planted_environment)
+expect_equal "environment after isolate_environment" \
+  "$(printf '%s\n' "$env_after" | grep -v '^_=' | LC_ALL=C sort)" \
+  "$(printf '%s\n' BUILDKIT_NO_CLIENT_TOKEN=true DOCKER_CONFIG=/planted/config GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_NOSYSTEM=1 "HOME=$HOME" "PATH=$PATH" | LC_ALL=C sort)"
+
+# isolate_environment stops if it cannot list the variables.
+isolate_without_compgen() {
+  enable -n compgen
+  isolate_environment
+}
+expect_stop "compgen" isolate_without_compgen
 
 # The lab's Docker configuration keeps only where the CLI plugins are, and an
 # auths entry for a host that cannot exist, so the CLI asks no credential
@@ -262,26 +298,29 @@ expect_stop "ichnos-lab-locked-registry did not answer with 401 after 30 tries" 
 
 # check_record passes records whose connections start from the builder or
 # loopback, and stops on a private value, an address read again for each
-# record, a connection from any other address, and a record with no trace.
+# record, a connection from any other address, and a record without exactly
+# one trace.
 printf '%s\n' 192.0.2.10 ichnos-test-user >"$work/private.txt"
 printf '%s\n' 127.0.0.1 ::1 172.17.0.2 >"$work/allowed.txt"
 host_addresses() { echo 203.0.113.5; }
 expect_pass check_record "$control"
-craft "$top/clean.dockerbuild" "$otlp" \
-  "$(span http.local 172.17.0.2:41578)$(span http.local 127.0.0.1:5000)$(span http.local '[::1]:5000')"
+craft "$top/clean.dockerbuild" \
+  "$(span http.local 172.17.0.2:41578)$(span http.local 127.0.0.1:5000)$(span http.local '[::1]:5000')" "$otlp"
 expect_pass check_record "$top/clean.dockerbuild"
 for key in http.local network.local.address net.sock.host.addr; do
-  craft "$top/$key.dockerbuild" "$otlp" "$(span http.local 172.17.0.2:41578)$(span "$key" 198.51.100.99:41000)"
+  craft "$top/$key.dockerbuild" "$(span http.local 172.17.0.2:41578)$(span "$key" 198.51.100.99:41000)" "$otlp"
   expect_stop "has a connection from an address other than the builder's or loopback" check_record "$top/$key.dockerbuild"
 done
-craft "$top/ipv6.dockerbuild" "$otlp" "$(span http.local '[2001:db8::99]:443')"
+craft "$top/ipv6.dockerbuild" "$(span http.local '[2001:db8::99]:443')" "$otlp"
 expect_stop "has a connection from an address other than the builder's or loopback" check_record "$top/ipv6.dockerbuild"
 for value in 192.0.2.10 ichnos-test-user 203.0.113.5; do
-  craft "$top/private.dockerbuild" "$otlp" "$(span http.local 172.17.0.2:41578){\"Name\":\"$value\"}"
+  craft "$top/private.dockerbuild" "$(span http.local 172.17.0.2:41578){\"Name\":\"$value\"}" "$otlp"
   expect_stop "contains a local user, host, network address or temporary path" check_record "$top/private.dockerbuild"
 done
-craft "$top/no-trace.dockerbuild" application/vnd.buildkit.status.v0 "$(span http.local 198.51.100.99:41000)"
-expect_stop "" check_record "$top/no-trace.dockerbuild"
+craft "$top/no-trace.dockerbuild" "$(span http.local 172.17.0.2:41578)" application/vnd.buildkit.status.v0
+expect_stop "does not have exactly one trace" check_record "$top/no-trace.dockerbuild"
+craft "$top/two-traces.dockerbuild" "$(span http.local 172.17.0.2:41578)" "$otlp" "$otlp"
+expect_stop "does not have exactly one trace" check_record "$top/two-traces.dockerbuild"
 
 # replace_records replaces only the named scenarios' records, replaces nothing
 # when a named scenario recorded nothing, and replaces every record when no
@@ -310,23 +349,40 @@ expect_pass replace_records
 expect_equal "records after a full run" "$(cd "$out" && echo *)" "b z"
 
 # lab_git and commit_fixture make the same commit in every recording, with a
-# fake identity, a fixed date and a fake remote.
+# fake identity, a fixed date and a fake remote, even when the environment
+# names another identity and date.
+plant_identity() {
+  export GIT_AUTHOR_NAME=planted GIT_AUTHOR_EMAIL=planted@example.invalid GIT_AUTHOR_DATE=2000-01-01T00:00:00Z
+  export GIT_COMMITTER_NAME=planted GIT_COMMITTER_EMAIL=planted@example.invalid GIT_COMMITTER_DATE=2000-01-01T00:00:00Z
+}
 for dir in git-a git-b; do
-  mkdir "$top/$dir"
+  mkdir "$top/$dir" "$top/fixture-$dir"
   echo same >"$top/$dir/file"
+  echo same >"$top/fixture-$dir/file"
   (
+    if [ "$dir" = git-b ]; then
+      plant_identity
+    fi
     lab_git -C "$top/$dir" init -q -b main
     lab_git -C "$top/$dir" add .
     lab_git -C "$top/$dir" commit -q -m fixture
+    commit_fixture "$top/fixture-$dir"
   )
-  mkdir "$top/fixture-$dir"
-  echo same >"$top/fixture-$dir/file"
-  (commit_fixture "$top/fixture-$dir")
 done
 expect_equal "repeated commit" "$(git -C "$top/git-a" rev-parse HEAD)" "$(git -C "$top/git-b" rev-parse HEAD)"
-expect_equal "commit identity and date" "$(git -C "$top/git-a" log -1 --format='%an %ae %at %ct')" \
-  "ichnos-fake ichnos-fake@example.invalid 1767225600 1767225600"
+expect_equal "commit identity and date" "$(git -C "$top/git-b" log -1 --format='%an %ae %cn %ce %at %ct')" \
+  "ichnos-fake ichnos-fake@example.invalid ichnos-fake ichnos-fake@example.invalid 1767225600 1767225600"
 expect_equal "repeated fixture commit" "$(git -C "$top/fixture-git-a" rev-parse HEAD)" "$(git -C "$top/fixture-git-b" rev-parse HEAD)"
 expect_equal "fixture remote" "$(git -C "$top/fixture-git-a" remote get-url origin)" https://example.invalid/ichnos-fake/lab.git
+
+# A global insteadOf cannot rewrite the remote URL that buildx reads with git.
+remote_with_user_config() {
+  export HOME="$top/home"
+  isolate_environment
+  git -C "$top/fixture-git-a" remote get-url origin
+}
+mkdir "$top/home"
+printf '[url "https://mirror.example.invalid/"]\n\tinsteadOf = https://\n' >"$top/home/.gitconfig"
+expect_equal "remote with a global insteadOf" "$(remote_with_user_config)" https://example.invalid/ichnos-fake/lab.git
 
 echo "record: all $n checks pass"

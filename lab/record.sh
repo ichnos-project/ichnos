@@ -96,12 +96,14 @@ same_dockerfile() {
 }
 
 # lab_git runs git with a fake identity and a fixed date, so that a commit is
-# the same in every recording.
+# the same in every recording. They are set through the environment, which git
+# prefers to any configuration.
 lab_git() {
-  local -x GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  local -x GIT_AUTHOR_NAME=ichnos-fake GIT_AUTHOR_EMAIL=ichnos-fake@example.invalid
+  local -x GIT_COMMITTER_NAME=ichnos-fake GIT_COMMITTER_EMAIL=ichnos-fake@example.invalid
   local -x GIT_AUTHOR_DATE=2026-01-01T00:00:00Z GIT_COMMITTER_DATE=2026-01-01T00:00:00Z
 
-  git -c user.name=ichnos-fake -c user.email=ichnos-fake@example.invalid "$@"
+  git "$@"
 }
 
 # Build a committed fixture from an absolute path: buildx leaves out vcs:localdir:* for a
@@ -136,7 +138,8 @@ wait_for_registry() {
 # macOS temporary path or a network address of this machine, read again for each
 # record in case one changed during the run. Every connection in the trace
 # starts from the builder or from loopback, so any other local address in it is
-# this machine's, even one that it no longer has.
+# this machine's, even one that it no longer has. A record must have exactly one
+# trace, as BuildKit writes, because the connection check reads only that one.
 check_record() {
   local record=$1 status=0 blob
 
@@ -154,7 +157,12 @@ check_record() {
 
   blob=$(tar -xOf "$work/record.tar" index.json | jq -r '.manifests[0].digest | ltrimstr("sha256:")')
   blob=$(tar -xOf "$work/record.tar" "blobs/sha256/$blob" |
-    jq -r '.layers[] | select(.mediaType == "application/vnd.buildkit.otlp.json.v0") | .digest | ltrimstr("sha256:")')
+    jq -r '[.layers[] | select(.mediaType == "application/vnd.buildkit.otlp.json.v0")] |
+      if length == 1 then .[0].digest | ltrimstr("sha256:") else empty end')
+  if [ -z "$blob" ]; then
+    echo "$record does not have exactly one trace" >&2
+    exit 1
+  fi
   tar -xOf "$work/record.tar" "blobs/sha256/$blob" |
     jq -r '.. | objects | select(.Key? | IN("http.local", "network.local.address", "net.sock.host.addr")) | .Value.Value' |
     sed -E 's/^\[(.*)\]:[0-9]+$/\1/; s/^([0-9.]+):[0-9]+$/\1/' | sort -u >"$work/local.txt"
@@ -229,14 +237,24 @@ record_pair() {
   fi
 }
 
-# isolate_environment makes every git and docker command use the lab's own
-# configuration, and docker the default socket. buildx would otherwise fetch
-# registry tokens itself, on this machine, and export that request, with this
-# machine's network address, into the record.
+# isolate_environment clears every variable but PATH, HOME and DOCKER_CONFIG,
+# which docker_config reads for the CLI plugins' location, and makes git ignore
+# the user's configuration. buildx reads variables such as SOURCE_DATE_EPOCH
+# into a build, git rewrites the remote URL that buildx records with a global
+# insteadOf, and buildx would fetch registry tokens itself, on this machine, and
+# export that request, with this machine's network address, into the record.
 isolate_environment() {
-  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT \
-    BUILDX_CONFIG DOCKER_CONTEXT DOCKER_HOST
-  export BUILDKIT_NO_CLIENT_TOKEN=true
+  local var names
+
+  # A failed command substitution in a for list does not stop the run.
+  names=$(compgen -e)
+  for var in $names; do
+    case $var in
+      PATH | HOME | DOCKER_CONFIG) ;;
+      *) unset "$var" ;;
+    esac
+  done
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 BUILDKIT_NO_CLIENT_TOKEN=true
 }
 
 # select_scenarios stops the run unless every name it is given is a scenario,
