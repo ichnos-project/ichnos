@@ -10,6 +10,7 @@ import (
 	"maps"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -34,7 +35,7 @@ type build struct {
 // step is one entry of the provenance's llbDefinition.
 type step struct {
 	id     string
-	inputs []string
+	inputs []stepInput
 	// op is the step's definition as BuildKit wrote it: a JSON object, or nil
 	// when the step has none. It stays raw, because a JSON value decoded into
 	// maps and slices can take about 70 times its size in memory.
@@ -44,6 +45,12 @@ type step struct {
 	// vertex is the index of the step's vertex in Record.vertices, or -1
 	// when the status stream has none, as for the final step.
 	vertex int
+}
+
+// stepInput is one input of a step: the index of the step it reads, in its
+// build's steps, and which of that step's outputs.
+type stepInput struct {
+	step, output int
 }
 
 // lineRange is a range of Dockerfile lines, counted from 1. The zero value
@@ -390,7 +397,19 @@ func (d *provenanceDecoder) decode(p rawProvenance) (build, bool, error) {
 			return build{}, false, malformed("provenance has two steps with one ID")
 		}
 		byID[def.id] = i
-		steps[i] = step{id: def.id, inputs: def.inputs, op: def.op, vertex: -1}
+		steps[i] = step{id: def.id, op: def.op, vertex: -1}
+	}
+	for i, def := range p.steps {
+		if def.inputs == nil {
+			continue
+		}
+		steps[i].inputs = make([]stepInput, len(def.inputs))
+		for k, in := range def.inputs {
+			var err error
+			if steps[i].inputs[k], err = resolveInput(in, byID); err != nil {
+				return build{}, false, err
+			}
+		}
 	}
 
 	mapped := make([]bool, len(steps))
@@ -452,6 +471,35 @@ func (d *provenanceDecoder) decode(p rawProvenance) (build, bool, error) {
 		steps[i].lines = first.lines
 	}
 	return build{platform: p.platform, steps: steps}, true, nil
+}
+
+// resolveInput reads an input as BuildKit writes it, "<step ID>:<output>"
+// (solver/llbsolver/provenance/buildconfig.go at v0.34.0), and returns the
+// index of the step it names. It resolves the raw ID, before redaction,
+// because redaction can turn two different IDs into the same text.
+func resolveInput(in string, byID map[string]int) (stepInput, error) {
+	id, output, ok := strings.CutLast(in, ":")
+	if !ok || output == "" || !isDigits(output) {
+		return stepInput{}, malformed("provenance has a step input that is not a step ID and an output")
+	}
+	n, err := strconv.Atoi(output)
+	if err != nil {
+		return stepInput{}, malformed("provenance has a step input that is not a step ID and an output")
+	}
+	i, found := byID[id]
+	if !found {
+		return stepInput{}, malformed("provenance has a step input that names no step")
+	}
+	return stepInput{step: i, output: n}, nil
+}
+
+func isDigits(s string) bool {
+	for i := range len(s) {
+		if !isDigit(s[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // stepDefinition returns the definition of one step, which must be a JSON

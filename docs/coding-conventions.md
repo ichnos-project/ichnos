@@ -125,7 +125,7 @@ Every dependency is code the project must keep secure, so prefer the standard li
 * New behavior comes with tests, and a bug fix comes with a test that fails without it.
 * Prefer table-driven tests with `t.Run`. A failure message names the call and prints the result before the expected value: `Parse(%q) = %v, want %v`.
 * Test every edge case in the plan: empty and nil input, zero and negative values, input exactly at and one byte over each limit, malformed and truncated data, unknown versions, Unicode and cancellation.
-* Every renderer has golden files, updated with `go test ./... -update` only when output changes on purpose.
+* Every renderer has golden files, updated with `ICHNOS_UPDATE_GOLDEN=1 go test ./...` only when output changes on purpose.
 * CLI tests run the command in-process with injected streams, and check stdout, stderr and the exit code.
 * Use hand-written fakes, not mocking frameworks: one error field per method, and `httptest` for the GitHub API.
 * Run tests with the race detector, and run each fuzz target in CI for a fixed number of inputs. Aim for at least 80% statement coverage, the OpenSSF Best Practices silver level.

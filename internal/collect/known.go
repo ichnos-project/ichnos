@@ -1,6 +1,9 @@
 package collect
 
-import "slices"
+import (
+	"slices"
+	"unicode/utf8"
+)
 
 // knownSet finds every occurrence of a set of values in one pass over a
 // text, in time linear in the text whatever the values are (Aho-Corasick).
@@ -168,4 +171,120 @@ func (k *knownSet) mark(text string, m *mask) bool {
 		m.mark(r.start, r.end)
 	}
 	return hit
+}
+
+// fragmentBytes is the length of the runs of bytes of a credential value
+// that fragmentSet holds. The Dockerfile frontend expands ${VAR#pattern},
+// ${VAR%pattern} and ${VAR/pattern/text} (processDollar in
+// frontend/dockerfile/shell/lex.go at BuildKit v0.34.0), so a step
+// definition can hold a credential with a few bytes cut off, which matching
+// whole values does not find. A shorter run would match ordinary text, such
+// as a path, too often; one of 8 bytes leaves at most 7 bytes of a
+// credential unseen.
+const fragmentBytes = 8
+
+// fragmentSet holds every run of fragmentBytes bytes of a set of values,
+// each packed into a uint64. It holds about 36 bytes per byte of the values,
+// and finds a run in a text in one pass over it. A Go map keeps an input
+// that the author of a pull request chose from making the lookups slow.
+type fragmentSet struct {
+	runs map[uint64]struct{}
+	// firstTwo has a bit for the first two bytes of each run, which rules
+	// out most windows of a text without a map lookup.
+	firstTwo [1 << 16 / 64]uint64
+}
+
+// newFragmentSet returns the runs of the values, or nil when no value is as
+// long as a run.
+func newFragmentSet(values []string) *fragmentSet {
+	n := 0
+	for _, v := range values {
+		n += max(len(v)-fragmentBytes+1, 0)
+	}
+	if n == 0 {
+		return nil
+	}
+	f := &fragmentSet{runs: make(map[uint64]struct{}, n)}
+	add := func(g uint64) {
+		f.runs[g] = struct{}{}
+		f.firstTwo[g&0xffff>>6] |= 1 << (g & 63)
+	}
+	for _, v := range values {
+		if len(v) < fragmentBytes {
+			continue
+		}
+		g := firstFragment(v)
+		add(g)
+		for i := fragmentBytes; i < len(v); i++ {
+			g = g>>8 | uint64(v[i])<<56
+			add(g)
+		}
+	}
+	return f
+}
+
+// has reports whether g is a run of f.
+func (f *fragmentSet) has(g uint64) bool {
+	if f.firstTwo[g&0xffff>>6]&(1<<(g&63)) == 0 {
+		return false
+	}
+	_, ok := f.runs[g]
+	return ok
+}
+
+// firstFragment packs the first fragmentBytes bytes of s, which has at
+// least that many.
+func firstFragment[T string | []byte](s T) uint64 {
+	var g uint64
+	for i := range fragmentBytes {
+		g |= uint64(s[i]) << (8 * i)
+	}
+	return g
+}
+
+// mark marks in m every run of fragmentBytes bytes of text that f holds,
+// and reports whether there is one. A run can start or end inside a UTF-8
+// character, which a whole value cannot, so each is widened to whole
+// characters: removing it then leaves valid UTF-8 valid.
+func (f *fragmentSet) mark(text string, m *mask) bool {
+	if f == nil || len(text) < fragmentBytes {
+		return false
+	}
+	hit := false
+	g := firstFragment(text)
+	for i := fragmentBytes; ; i++ {
+		if f.has(g) {
+			start, end := i-fragmentBytes, i
+			for k := 1; k < utf8.UTFMax && start > 0 && !utf8.RuneStart(text[start]); k++ {
+				start--
+			}
+			for k := 1; k < utf8.UTFMax && end < len(text) && !utf8.RuneStart(text[end]); k++ {
+				end++
+			}
+			m.mark(start, end)
+			hit = true
+		}
+		if i == len(text) {
+			return hit
+		}
+		g = g>>8 | uint64(text[i])<<56
+	}
+}
+
+// sharesFragment reports whether s holds a run of fragmentBytes bytes of a
+// value of f.
+func sharesFragment[T string | []byte](f *fragmentSet, s T) bool {
+	if f == nil || len(s) < fragmentBytes {
+		return false
+	}
+	g := firstFragment(s)
+	for i := fragmentBytes; ; i++ {
+		if f.has(g) {
+			return true
+		}
+		if i == len(s) {
+			return false
+		}
+		g = g>>8 | uint64(s[i])<<56
+	}
 }

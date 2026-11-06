@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 1,
+  "fingerprintVersion": 1,
+  "provenance": "read",
+  "platforms": [
+    {
+      "platform": "linux/amd64",
+      "steps": [
+        {
+          "op": "source",
+          "sourceKind": "image",
+          "text": "FROM alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f",
+          "lines": {
+            "start": 1,
+            "end": 1
+          },
+          "vertex": 2,
+          "environment": -1,
+          "fingerprints": {
+            "command": "8572d5b117b485a9533fb7240c5f85e547564e7b6b92cd6c7c4a665bece4315b",
+            "other": "b4329afcf7f1531fbd83900dcf40bb95f197a3af30c0d687ba28b8aab5657366",
+            "ancestor": "316619fb96e741b729275b8a1c1c48fea951042a1dd173ed73b73f9e07edc0cd"
+          }
+        },
+        {
+          "op": "file",
+          "text": "WORKDIR /app",
+          "lines": {
+            "start": 2,
+            "end": 2
+          },
+          "vertex": 4,
+          "inputs": [
+            0
+          ],
+          "environment": -1,
+          "fingerprints": {
+            "command": "95b5eb64721654da5527f82e0a41a4ce013a57088fd684a4a5228bfa1a3f8a97",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "89e758f2ff8bd7e0858ddb9c7a0016e01b3b545c32bcea5a37f0f7c04338ab52"
+          }
+        },
+        {
+          "op": "source",
+          "sourceKind": "local",
+          "vertex": 7,
+          "environment": -1,
+          "fingerprints": {
+            "command": "34670d086febd14347bd853113e47ce2a74b8ba0b7db71567740738c194c6ada",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "de90acc3cdfe014e3c9cf444470bad32d4c7de75d18d31895ffb906a1cdf22c7"
+          },
+          "fromLocalContext": true
+        },
+        {
+          "op": "file",
+          "text": "COPY config.txt .",
+          "lines": {
+            "start": 3,
+            "end": 3
+          },
+          "vertex": 1,
+          "inputs": [
+            1,
+            2
+          ],
+          "environment": -1,
+          "fingerprints": {
+            "command": "6a05bc0473e06143d108d25d3a51bf61d6989a2642aca5cc28155497e0b57c28",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "08563f8170950618b601909aed12aa909e63bbc288c200b29b050fc92b68308e"
+          },
+          "fromLocalContext": true,
+          "sources": [
+            {
+              "context": 0,
+              "path": "config.txt"
+            }
+          ]
+        },
+        {
+          "op": "exec",
+          "text": "RUN wc -c config.txt \u003e size.txt",
+          "lines": {
+            "start": 4,
+            "end": 4
+          },
+          "vertex": 0,
+          "inputs": [
+            3
+          ],
+          "environment": 0,
+          "fingerprints": {
+            "command": "61b5068d6fae40aafbca04dc1376b4239a48de2badc9d59817ff3d77d40288fd",
+            "other": "b8dbdcd22b333108fbb8ce4fbefede750a55337aec3c68218a8023b64784ecc9",
+            "ancestor": "e0dc9a4e394ae402988d75ac7094fe0f2291c0e88936d26140fdac5d45eab956"
+          },
+          "fromLocalContext": true
+        },
+        {
+          "op": "file",
+          "text": "COPY app.txt .",
+          "lines": {
+            "start": 5,
+            "end": 5
+          },
+          "vertex": 8,
+          "inputs": [
+            4,
+            2
+          ],
+          "environment": -1,
+          "fingerprints": {
+            "command": "af9453db62f24ca894b1646fce3ad165c64a40d96721296456da7d1c4aadf717",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "1c8b372148b0981a31bf9ca956cf2341db558399f1f389eee8a9784fd30163b6"
+          },
+          "fromLocalContext": true,
+          "sources": [
+            {
+              "context": 0,
+              "path": "app.txt"
+            }
+          ]
+        },
+        {
+          "op": "exec",
+          "text": "RUN cat config.txt app.txt \u003e bundle.txt",
+          "lines": {
+            "start": 6,
+            "end": 6
+          },
+          "vertex": 3,
+          "inputs": [
+            5
+          ],
+          "environment": 0,
+          "fingerprints": {
+            "command": "f8fbfea4090dd9053a9ae40428aff855df37d95f7e72487402476b65b5e9472d",
+            "other": "b8dbdcd22b333108fbb8ce4fbefede750a55337aec3c68218a8023b64784ecc9",
+            "ancestor": "926f956b3b0a07da892cee4928211b846dca70e25320fffd3b7c6bec1703fdc8"
+          },
+          "fromLocalContext": true
+        },
+        {
+          "op": "none",
+          "vertex": -1,
+          "inputs": [
+            6
+          ],
+          "environment": -1,
+          "fingerprints": {
+            "command": "1f7cfb35dfe3ad6b3360185589bd37328c733ecc6f0aefdd8df8948b4d89ef60",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "66c49fb3c16cb3a956aca9abe297d38cd18b6b7d56553353f0e6552548e0806f"
+          },
+          "fromLocalContext": true
+        }
+      ],
+      "environments": [
+        [
+          {
+            "name": "PATH",
+            "value": "29c619214be3622e1a2f1a84324ca2a2416b5a5ffd7acaac6f49d48d62de0c34"
+          }
+        ]
+      ],
+      "contexts": [
+        {
+          "name": "context",
+          "steps": [
+            2
+          ]
+        }
+      ]
+    }
+  ],
+  "vertices": [
+    {
+      "kind": "step",
+      "cached": true,
+      "started": "2026-11-01T15:40:13.801716628Z",
+      "completed": "2026-11-01T15:40:13.801716628Z"
+    },
+    {
+      "kind": "step",
+      "cached": true,
+      "started": "2026-11-01T15:40:13.801716628Z",
+      "completed": "2026-11-01T15:40:13.801716628Z"
+    },
+    {
+      "kind": "step",
+      "started": "2026-11-01T15:40:13.766606128Z",
+      "completed": "2026-11-01T15:40:13.776841795Z"
+    },
+    {
+      "kind": "step",
+      "cached": true,
+      "started": "2026-11-01T15:40:13.801716628Z",
+      "completed": "2026-11-01T15:40:14.106739795Z"
+    },
+    {
+      "kind": "step",
+      "cached": true,
+      "started": "2026-11-01T15:40:13.801716628Z",
+      "completed": "2026-11-01T15:40:13.801716628Z"
+    },
+    {
+      "kind": "internal",
+      "started": "2026-11-01T15:40:11.46018146Z",
+      "completed": "2026-11-01T15:40:11.466135919Z"
+    },
+    {
+      "kind": "internal",
+      "started": "2026-11-01T15:40:13.750607586Z",
+      "completed": "2026-11-01T15:40:13.763612503Z"
+    },
+    {
+      "kind": "internal",
+      "started": "2026-11-01T15:40:13.766933336Z",
+      "completed": "2026-11-01T15:40:13.799408586Z"
+    },
+    {
+      "kind": "step",
+      "cached": true,
+      "started": "2026-11-01T15:40:13.801716628Z",
+      "completed": "2026-11-01T15:40:13.801716628Z"
+    },
+    {
+      "kind": "cache-import",
+      "started": "2026-11-01T15:40:13.766524753Z",
+      "completed": "2026-11-01T15:40:13.771313003Z"
+    },
+    {
+      "kind": "internal",
+      "started": "2026-11-01T15:40:14.107927462Z",
+      "completed": "2026-11-01T15:40:14.134996545Z"
+    },
+    {
+      "kind": "internal",
+      "started": "2026-11-01T15:40:11.466969085Z",
+      "completed": "2026-11-01T15:40:13.750342295Z"
+    }
+  ],
+  "cache": {
+    "imports": [
+      {
+        "type": "local"
+      }
+    ]
+  },
+  "buildArgs": []
+}

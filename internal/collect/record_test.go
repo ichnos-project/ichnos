@@ -221,8 +221,8 @@ func TestDecodeRecordSimple(t *testing.T) {
 			t.Errorf("step %d vertex = %d, want present %v with hit %v", i, s.vertex, w.has, w.hit)
 		}
 	}
-	if !slices.Equal(b.steps[1].inputs, []string{"step0:0"}) {
-		t.Errorf("step 1 inputs = %q, want [step0:0]", b.steps[1].inputs)
+	if want := []stepInput{{step: 0, output: 0}}; !slices.Equal(b.steps[1].inputs, want) {
+		t.Errorf("step 1 inputs = %v, want %v", b.steps[1].inputs, want)
 	}
 }
 
@@ -477,6 +477,15 @@ func TestDecodeRecordProvenance(t *testing.T) {
 			p.provenances = [][]byte{prov.json(t)}
 		}, []string{"linux/amd64"}, nil, provenanceRead},
 		{"step with no vertex", withSteps(func(s []testStep) []testStep { s[1].digest = digestOf('9'); return s }), []string{"linux/amd64"}, nil, provenanceRead},
+		{"input that names no step", withSteps(func(s []testStep) []testStep { s[1].inputs = []string{"step9:0"}; return s }), nil, ErrMalformedRecord, provenanceRead},
+		{"input with no output", withSteps(func(s []testStep) []testStep { s[1].inputs = []string{"step0"}; return s }), nil, ErrMalformedRecord, provenanceRead},
+		{"input with an empty output", withSteps(func(s []testStep) []testStep { s[1].inputs = []string{"step0:"}; return s }), nil, ErrMalformedRecord, provenanceRead},
+		{"input with a negative output", withSteps(func(s []testStep) []testStep { s[1].inputs = []string{"step0:-1"}; return s }), nil, ErrMalformedRecord, provenanceRead},
+		{"input with a signed output", withSteps(func(s []testStep) []testStep { s[1].inputs = []string{"step0:+1"}; return s }), nil, ErrMalformedRecord, provenanceRead},
+		{"input with an output that is not a number", withSteps(func(s []testStep) []testStep { s[1].inputs = []string{"step0:x"}; return s }), nil, ErrMalformedRecord, provenanceRead},
+		{"input with an output too large for an int", withSteps(func(s []testStep) []testStep { s[1].inputs = []string{"step0:99999999999999999999"}; return s }), nil, ErrMalformedRecord, provenanceRead},
+		{"empty input", withSteps(func(s []testStep) []testStep { s[1].inputs = []string{""}; return s }), nil, ErrMalformedRecord, provenanceRead},
+		{"input to a step listed later", withSteps(func(s []testStep) []testStep { s[0].inputs = []string{"step1:0"}; return s }), []string{"linux/amd64"}, nil, provenanceRead},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -840,14 +849,14 @@ func FuzzDecodeRecord(f *testing.F) {
 		if text > lim.textBytes {
 			t.Fatalf("decodeRecord() kept %d bytes of text, want at most %d", text, lim.textBytes)
 		}
-		once, err := redact(rec)
+		once, err := redact(t.Context(), rec)
 		if err != nil {
 			if !isTyped(err) {
 				t.Fatalf("redact() error = %v, want a typed error", err)
 			}
 			return
 		}
-		if twice, err := redact(rec); err != nil || !redactedEqual(once, twice) {
+		if twice, err := redact(t.Context(), rec); err != nil || !redactedEqual(once, twice) {
 			t.Fatalf("redact() is not deterministic")
 		}
 	})
