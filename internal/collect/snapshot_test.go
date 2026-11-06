@@ -226,11 +226,12 @@ func TestSnapshotFixtures(t *testing.T) {
 // their other fields, and anything that changes a step changes the
 // ancestors of every step after it. A variable that a line adds also
 // changes the other fields, which hold the order of the names. A change to
-// the content of a copied file or of a remote file shows in no fingerprint.
+// the content of a copied, mounted or remote file shows in no fingerprint.
 // A change to .dockerignore, or a COPY that a line adds, changes what the
-// build context sends, which shows only in the command fingerprint of the
-// step that loads the context. That step has no Dockerfile text, so it is
-// on no line here.
+// build context sends, and a change to the commit of a Git context changes
+// the step that fetches it. Each shows only in the command fingerprint of
+// the step that loads the context. That step has no Dockerfile text, so it
+// is on no line here.
 func fingerprintChanges() map[string]struct {
 	env, other, ancestor []int
 	vars                 []string
@@ -411,6 +412,61 @@ func TestSnapshotLabFacts(t *testing.T) {
 	remote := snap("remote-add", "pr").Platforms[0]
 	if !slices.ContainsFunc(remote.Steps, func(st snapshot.Step) bool { return st.FromHTTP && st.Text != "" }) {
 		t.Error("remote-add has no step that descends from an HTTP source")
+	}
+	for _, tt := range []struct {
+		scenario         string
+		imports, errored int
+	}{
+		{"registry-cache", 1, 0},
+		{"one-failed-cache-import", 2, 1},
+		{"failed-cache-import", 3, 3},
+	} {
+		s := snap(tt.scenario, "pr")
+		if want := slices.Repeat([]snapshot.CacheImport{{Type: snapshot.CacheRegistry}}, tt.imports); !slices.Equal(s.Cache.Imports, want) {
+			t.Errorf("%s imports = %+v, want %+v", tt.scenario, s.Cache.Imports, want)
+		}
+		var runs, errored int
+		for _, v := range s.Vertices {
+			if v.Kind == snapshot.VertexCacheImport {
+				runs++
+				if v.Errored {
+					errored++
+				}
+			}
+		}
+		if runs != tt.imports || errored != tt.errored {
+			t.Errorf("%s has %d cache import vertices, %d with an error, want %d and %d", tt.scenario, runs, errored, tt.imports, tt.errored)
+		}
+	}
+	for _, tt := range []struct {
+		scenario, context string
+		want              map[int][]string
+	}{
+		{"bind-mount", "context", map[int][]string{3: {"config.txt"}, 4: {"app.txt"}}},
+		{"cache-mount-from", "seed", map[int][]string{3: {"config"}, 4: {"app"}}},
+	} {
+		s := snap(tt.scenario, "pr")
+		checkSnapshot(t, s)
+		p := s.Platforms[0]
+		got := map[int][]string{}
+		for _, st := range p.Steps {
+			for _, src := range st.Sources {
+				if name := p.Contexts[src.Context].Name; name != tt.context {
+					t.Errorf("%s line %d reads %q from context %q, want %q", tt.scenario, st.Lines.Start, src.Path, name, tt.context)
+				}
+				got[st.Lines.Start] = append(got[st.Lines.Start], src.Path)
+			}
+		}
+		if !maps.EqualFunc(got, tt.want, slices.Equal) {
+			t.Errorf("%s sources by line = %v, want %v", tt.scenario, got, tt.want)
+		}
+	}
+	gitContext := snap("git-context-dockerignore", "pr").Platforms[0]
+	if len(gitContext.Contexts) != 0 || !slices.ContainsFunc(gitContext.Steps, func(st snapshot.Step) bool { return st.SourceKind == snapshot.SourceGit }) {
+		t.Errorf("git-context-dockerignore has local contexts %+v, or no Git source", gitContext.Contexts)
+	}
+	if st, once := onlyStepWithText(gitContext, "COPY . all/"); !once || !st.FromGit || st.FromLocalContext || st.Sources != nil {
+		t.Errorf("COPY . all/ = %+v, want one step that descends from the Git context and reads no local source", st)
 	}
 }
 

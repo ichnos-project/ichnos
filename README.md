@@ -21,7 +21,7 @@ Ichnos is a command-line tool and CI integration that explains why a container b
 ## Why Ichnos?
 
 - Docker's build summary and hosted builders report cache hit rates and timings, but not why a step missed the cache. Build systems such as Gradle Develocity and BuildBuddy explain cache misses by comparing two builds; Ichnos brings that to container builds.
-- Ichnos uses the pull request's diff to name the changed files behind a `COPY` miss, after `.dockerignore`.
+- Ichnos uses the pull request's diff to name the changed files behind a `COPY` miss, after `.dockerignore` for a local build context. BuildKit applies no `.dockerignore` to a Git context.
 - Every explanation lists the evidence behind it and a confidence level. When the evidence is not enough, Ichnos reports "unknown" rather than guessing.
 - Ichnos needs no changes to your build. It reads the build records BuildKit already keeps, which `docker/build-push-action` uploads by default.
 - Ichnos is safe on pull requests from forks: the job that comments never runs pull request code, and the jobs that run pull request code never get a write token.
