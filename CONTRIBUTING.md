@@ -68,6 +68,7 @@ You will need:
 
 * Go 1.27 or later
 * `make`
+* `jq` and `sha256sum`, for `make test`
 * [golangci-lint](https://golangci-lint.run/), for `make lint`
 
 | Command | Description |
