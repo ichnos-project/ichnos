@@ -86,7 +86,7 @@ Code follows the [Coding Conventions](docs/coding-conventions.md).
 
 * New functionality must come with automated tests.
 * A bug fix must include a test that fails without the fix.
-* A change to output must update the golden files (`go test ./... -update`).
+* A change to output must update the golden files (`ICHNOS_UPDATE_GOLDEN=1 go test ./...`).
 * CI treats linter warnings as errors.
 
 ### Adding an Audit Rule

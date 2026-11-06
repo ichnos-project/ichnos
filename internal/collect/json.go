@@ -17,7 +17,9 @@ var errNotValid = errors.New("JSON does not have the expected shape")
 // jsonReader reads the tokens of one JSON value and reports where each
 // ends. Duplicate names pass through.
 type jsonReader struct {
-	dec     *jsontext.Decoder
+	dec *jsontext.Decoder
+	// buf holds the value being read, so that reset needs no new buffer.
+	buf     bytes.Buffer
 	scratch []byte
 }
 
@@ -25,7 +27,45 @@ type jsonReader struct {
 // copying it, and nothing writes to the buffer.
 func newJSONReader(v []byte, opts ...jsontext.Options) *jsonReader {
 	opts = append([]jsontext.Options{jsontext.AllowDuplicateNames(true)}, opts...)
-	return &jsonReader{dec: jsontext.NewDecoder(bytes.NewBuffer(v), opts...)}
+	j := &jsonReader{buf: *bytes.NewBuffer(v)}
+	j.dec = jsontext.NewDecoder(&j.buf, opts...)
+	return j
+}
+
+// reset starts reading v, as newJSONReader does, with the same decoder.
+func (j *jsonReader) reset(v []byte) {
+	j.buf = *bytes.NewBuffer(v)
+	j.dec.Reset(&j.buf, jsontext.AllowDuplicateNames(true))
+}
+
+// readStringList reads s, a JSON list of strings in a string, as BuildKit
+// encodes the paths and patterns of a source attribute
+// (client/llb/source.go at v0.34.0), and calls each with every string in
+// order. It returns a *LimitError that each returns, and errNotValid when s
+// is not such a list or each returns any other error.
+func readStringList(s string, each func(string) error) error {
+	j := newJSONReader([]byte(s))
+	err := j.elements(func() error {
+		if j.peek() != jsontext.KindString {
+			return errNotValid
+		}
+		v, err := j.str()
+		if err != nil {
+			return err
+		}
+		return each(v)
+	})
+	if err == nil {
+		err = j.end()
+	}
+	var le *LimitError
+	switch {
+	case errors.As(err, &le):
+		return err
+	case err != nil:
+		return errNotValid
+	}
+	return nil
 }
 
 // newJSONStreamReader reads from r as it goes, and holds only the value it

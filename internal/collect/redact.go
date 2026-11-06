@@ -2,6 +2,7 @@ package collect
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json/jsontext"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"math/bits"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -24,18 +26,32 @@ const (
 )
 
 // redacted is a Record with its credentials removed. It keeps only the
-// fields that Ichnos uses: the build arguments, the cache settings, each
-// vertex's kind and result, each step's definition and Dockerfile text, and
-// the provenance state, which says why a record has no builds. Vertex
-// digests are dropped. Other values stay in plain text until a snapshot
+// fields that Ichnos uses: the build arguments, the cache settings, the
+// built commit and the directories of the build contexts, each vertex's kind
+// and result, each step's definition, inputs and Dockerfile text, and the
+// provenance state, which says why a record has no builds. Vertex digests
+// and step IDs are dropped. Other values stay in plain text until a snapshot
 // hashes them.
 type redacted struct {
-	buildArgs  []buildArg
-	imports    []cacheType
-	noCache    noCacheSetting
-	vertices   []redactedVertex
-	builds     []redactedBuild
-	provenance provenanceState
+	buildArgs []buildArg
+	imports   []cacheType
+	noCache   noCacheSetting
+	// revision is the vcs:revision attribute, which buildx sets to the
+	// commit of the build context's Git work tree.
+	revision string
+	// contextDirs are the vcs:localdir:<name> attributes, in the order of
+	// their names before redaction.
+	contextDirs []contextDir
+	vertices    []redactedVertex
+	builds      []redactedBuild
+	provenance  provenanceState
+}
+
+// contextDir is the directory of one local build context, relative to the
+// root of its Git work tree. withheld is true when redaction changed it.
+type contextDir struct {
+	name, dir string
+	withheld  bool
 }
 
 type buildArg struct {
@@ -51,6 +67,8 @@ type buildArg struct {
 type noCacheSetting struct {
 	set    bool
 	stages string
+	// withheld is true when redaction changed the stages.
+	withheld bool
 }
 
 type cacheType int
@@ -89,12 +107,13 @@ type redactedVertex struct {
 
 type redactedBuild struct {
 	platform string
+	// withheld is true when redaction changed the platform.
+	withheld bool
 	steps    []redactedStep
 }
 
 type redactedStep struct {
-	id     string
-	inputs []string
+	inputs []stepInput
 	// op is the redacted definition as JSON, with BuildKit's key order and,
 	// where nothing was redacted, BuildKit's bytes.
 	op     jsontext.Value
@@ -105,11 +124,15 @@ type redactedStep struct {
 	// credential, or when redaction removed or replaced any of its values, so
 	// a comparison cannot tell whether that input changed.
 	withheld bool
+	// changedEnv are the positions, in ascending order, of the entries of
+	// meta.env that redaction changed.
+	changedEnv []int
 }
 
 // maxKnownBytes caps the total size of the distinct credential values that
 // are removed from every other string. Their search holds about 33 bytes per
-// byte of them, about 33 MiB at the cap.
+// byte of them and the set of their fragments about 36, so about 69 MiB at
+// the cap, as measured with 128 values of 8 KiB (1,047,680 fragments).
 const maxKnownBytes = 1 << 20
 
 // maxStringBytes is the longest string that redaction inspects. A longer one
@@ -124,8 +147,9 @@ const maxStringBytes = 1 << 20
 // arguments and environment variables are removed from every other string,
 // because BuildKit expands them into COPY sources, ADD URLs, heredocs and
 // image references. It returns a *LimitError when those values are too large
-// to search for.
-func redact(r *Record) (redacted, error) {
+// to search for, and an error that wraps ctx.Err() when ctx ends first,
+// which it checks between steps.
+func redact(ctx context.Context, r *Record) (redacted, error) {
 	s, err := newScrubber(r)
 	if err != nil {
 		return redacted{}, err
@@ -134,26 +158,42 @@ func redact(r *Record) (redacted, error) {
 	if err != nil {
 		return redacted{}, err
 	}
+	var ignored bool
+	keys := slices.Sorted(maps.Keys(r.attrs))
 	out := redacted{
-		buildArgs:  s.buildArgs(r.attrs),
-		imports:    imports,
-		noCache:    s.noCache(r.attrs),
-		vertices:   make([]redactedVertex, len(r.vertices)),
-		builds:     make([]redactedBuild, len(r.builds)),
-		provenance: r.provenance,
+		buildArgs:   s.buildArgs(keys, r.attrs),
+		imports:     imports,
+		noCache:     s.noCache(r.attrs),
+		revision:    s.str(r.attrs["vcs:revision"], &ignored),
+		contextDirs: s.contextDirs(keys, r.attrs),
+		vertices:    make([]redactedVertex, len(r.vertices)),
+		builds:      make([]redactedBuild, len(r.builds)),
+		provenance:  r.provenance,
 	}
 	for i, v := range r.vertices {
 		out.vertices[i] = redactedVertex{kind: v.kind, vertexStatus: v.vertexStatus}
 	}
 	for i, b := range r.builds {
-		var ignored bool
 		steps := make([]redactedStep, len(b.steps))
+		total := 0
+		for _, st := range b.steps {
+			total += len(st.inputs)
+		}
+		inputs := make([]stepInput, total)
 		for j, st := range b.steps {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return redacted{}, fmt.Errorf("redacting build record: %w", ctxErr)
+			}
 			if steps[j], err = s.step(st); err != nil {
 				return redacted{}, err
 			}
+			if n := len(st.inputs); n > 0 {
+				steps[j].inputs, inputs = inputs[:n:n], inputs[n:]
+				copy(steps[j].inputs, st.inputs)
+			}
 		}
-		out.builds[i] = redactedBuild{platform: s.str(b.platform, &ignored), steps: steps}
+		out.builds[i] = redactedBuild{steps: steps}
+		out.builds[i].platform = s.str(b.platform, &out.builds[i].withheld)
 	}
 	return out, nil
 }
@@ -213,10 +253,15 @@ func parseCacheType(s string) cacheType {
 	return cacheUnknown
 }
 
-// scrubber removes the known credential values of one record from strings.
-// known is nil when the record has none.
+// scrubber removes the known credential values of one record from strings,
+// and every run of fragmentBytes bytes of those values, as a part of one
+// that the Dockerfile frontend cut. known is nil when the record has none,
+// and fragments when none is as long as a run. j reads the step definitions
+// one at a time, or is nil, and then each definition gets its own reader.
 type scrubber struct {
-	known *knownSet
+	known     *knownSet
+	fragments *fragmentSet
+	j         *jsonReader
 }
 
 // newScrubber collects the distinct credential values of r. It counts their
@@ -241,17 +286,19 @@ func newScrubber(r *Record) (scrubber, error) {
 			}
 		}
 	}
+	j := newJSONReader(nil)
 	for _, b := range r.builds {
 		for _, st := range b.steps {
-			if err := forEachEnvValue(st.op, add); err != nil {
+			if err := forEachEnvValue(j, st.op, add); err != nil {
 				return scrubber{}, err
 			}
 		}
 	}
 	if len(known) == 0 {
-		return scrubber{}, nil
+		return scrubber{j: j}, nil
 	}
-	return scrubber{known: newKnownSet(slices.Sorted(maps.Keys(known)))}, nil
+	values := slices.Sorted(maps.Keys(known))
+	return scrubber{known: newKnownSet(values), fragments: newFragmentSet(values), j: j}, nil
 }
 
 // scrubbable reports whether a credential value is removed from every other
@@ -275,13 +322,14 @@ func scrubbable(v string) bool {
 
 // forEachEnvValue calls f with the value of each credential environment
 // variable in a step definition: the NAME=VALUE strings directly inside a
-// list under the key env, at any depth.
-func forEachEnvValue(op jsontext.Value, f func(string) error) error {
+// list under the key env, at any depth. It reads op with j.
+func forEachEnvValue(j *jsonReader, op jsontext.Value, f func(string) error) error {
 	if op == nil {
 		return nil
 	}
-	w := envWalker{j: newJSONReader(op), f: f}
-	err := w.value("")
+	j.reset(op)
+	w := envWalker{j: j, f: f}
+	err := w.value(false)
 	var le *LimitError
 	if err != nil && !errors.As(err, &le) {
 		return malformed("step definition is not valid JSON")
@@ -294,19 +342,20 @@ type envWalker struct {
 	f func(string) error
 }
 
-// value reads the next value, which sits under key.
-func (w *envWalker) value(key string) error {
+// value reads the next value, which sits under the key env when underEnv
+// is set.
+func (w *envWalker) value(underEnv bool) error {
 	switch w.j.peek() {
 	case jsontext.KindBeginObject:
 		if err := w.j.next(); err != nil {
 			return err
 		}
 		for w.j.peek() != jsontext.KindEndObject {
-			_, name, err := w.j.readString()
+			_, name, err := w.j.readBytes()
 			if err != nil {
 				return err
 			}
-			if err := w.value(name); err != nil {
+			if err := w.value(string(name) == "env"); err != nil {
 				return err
 			}
 		}
@@ -316,8 +365,8 @@ func (w *envWalker) value(key string) error {
 			return err
 		}
 		for w.j.peek() != jsontext.KindEndArray {
-			if key != "env" || w.j.peek() != jsontext.KindString {
-				if err := w.value(""); err != nil {
+			if !underEnv || w.j.peek() != jsontext.KindString {
+				if err := w.value(false); err != nil {
 					return err
 				}
 				continue
@@ -341,15 +390,17 @@ func (w *envWalker) value(key string) error {
 	}
 }
 
-func (s scrubber) buildArgs(attrs map[string]string) []buildArg {
+// buildArgs returns the build arguments among attrs, whose keys are sorted
+// in keys.
+func (s scrubber) buildArgs(keys []string, attrs map[string]string) []buildArg {
 	var out []buildArg
-	for _, k := range slices.Sorted(maps.Keys(attrs)) {
+	for _, k := range keys {
 		name, ok := strings.CutPrefix(k, "build-arg:")
 		if !ok {
 			continue
 		}
-		var ignored, withheld bool
-		a := buildArg{name: s.str(name, &ignored)}
+		var withheld bool
+		a := buildArg{name: s.str(name, &withheld)}
 		switch {
 		case isCredentialName(name):
 			withheld = true
@@ -369,25 +420,43 @@ func (s scrubber) noCache(attrs map[string]string) noCacheSetting {
 	if !ok {
 		return noCacheSetting{}
 	}
-	var ignored bool
-	return noCacheSetting{set: true, stages: s.str(stages, &ignored)}
+	n := noCacheSetting{set: true}
+	n.stages = s.str(stages, &n.withheld)
+	return n
 }
 
-func (s scrubber) step(st step) (redactedStep, error) {
-	out := redactedStep{lines: st.lines, vertex: st.vertex}
-	out.id = s.str(st.id, &out.withheld)
-	if st.inputs != nil {
-		out.inputs = make([]string, len(st.inputs))
-		for i, in := range st.inputs {
-			out.inputs[i] = s.str(in, &out.withheld)
+// contextDirs returns the directory of each local build context that buildx
+// recorded among attrs, whose keys are sorted in keys. The directory of a
+// context whose name looks like a credential, or whose name redaction
+// changed, is withheld and left out: a step finds its context's directory
+// by the redacted name, which another context can have too.
+func (s scrubber) contextDirs(keys []string, attrs map[string]string) []contextDir {
+	var out []contextDir
+	for _, k := range keys {
+		if name, ok := strings.CutPrefix(k, "vcs:localdir:"); ok {
+			var d contextDir
+			d.name = s.str(name, &d.withheld)
+			if isCredentialName(name) {
+				d.withheld = true
+			}
+			if !d.withheld {
+				d.dir = s.str(attrs[k], &d.withheld)
+			}
+			out = append(out, d)
 		}
 	}
-	op, err := s.op(st.op, &out.withheld)
+	return out
+}
+
+// step redacts a step, without its inputs.
+func (s scrubber) step(st step) (redactedStep, error) {
+	out := redactedStep{lines: st.lines, vertex: st.vertex}
+	op, changedEnv, err := s.op(st.op, &out.withheld)
 	if err != nil {
 		return redactedStep{}, err
 	}
-	out.op = op
-	out.text = s.text(st.text, &out.withheld)
+	out.op, out.changedEnv = op, changedEnv
+	out.text = s.text(validText(st.text), &out.withheld)
 	return out, nil
 }
 
@@ -395,18 +464,29 @@ func (s scrubber) step(st step) (redactedStep, error) {
 // stream and copies it only from the first change on, so a definition that
 // needs no redaction costs one copy, and memory stays proportional to the
 // definition's size. A string that no rule changes keeps its original bytes.
-func (s scrubber) op(op jsontext.Value, withheld *bool) (jsontext.Value, error) {
+//
+// It also returns the positions of the entries of Op.exec.meta.env that it
+// changed, the environment that a snapshot reads, so that the snapshot can
+// withhold each of those variables: two values that redaction turns into
+// the same text must not compare as equal.
+func (s scrubber) op(op jsontext.Value, withheld *bool) (jsontext.Value, []int, error) {
 	if op == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	w := opRedactor{s: s, j: newJSONReader(op), src: op, withheld: withheld}
-	if err := w.value(""); err != nil {
-		return nil, malformed("step definition is not valid JSON")
+	j := s.j
+	if j == nil {
+		j = newJSONReader(op)
+	} else {
+		j.reset(op)
+	}
+	w := opRedactor{s: s, j: j, src: op, withheld: withheld}
+	if err := w.value("", atRoot); err != nil {
+		return nil, nil, malformed("step definition is not valid JSON")
 	}
 	if w.out == nil {
-		return bytes.Clone(op), nil
+		return bytes.Clone(op), w.changedEnv, nil
 	}
-	return append(w.out, op[w.copied:]...), nil
+	return append(w.out, op[w.copied:]...), w.changedEnv, nil
 }
 
 // opRedactor copies one step definition, redacting it on the way. Until a
@@ -418,6 +498,37 @@ type opRedactor struct {
 	out      []byte
 	copied   int
 	withheld *bool
+	// changed is true when the last string read was replaced.
+	changed bool
+	// changedEnv are the positions of the Op.exec.meta.env entries it
+	// replaced.
+	changedEnv []int
+}
+
+// opPath is where the redactor is on the way to Op.exec.meta.env, the
+// environment that a snapshot reads. Each state is one member deeper; an
+// array, or any other member, leaves the way.
+type opPath uint8
+
+const (
+	elsewhere opPath = iota
+	atRoot
+	atOp
+	atExec
+	atMeta
+)
+
+// child returns where the member k of an object at p is.
+func (p opPath) child(k string) opPath {
+	switch {
+	case p == atRoot && k == "Op":
+		return atOp
+	case p == atOp && k == "exec":
+		return atExec
+	case p == atExec && k == "meta":
+		return atMeta
+	}
+	return elsewhere
 }
 
 // replace puts repl in place of src[start:end].
@@ -430,17 +541,17 @@ func (w *opRedactor) replace(start, end int, repl []byte) {
 	w.copied = end
 }
 
-// value reads the next value, which sits under key.
-func (w *opRedactor) value(key string) error {
+// value reads the next value, which sits under key, at.
+func (w *opRedactor) value(key string, at opPath) error {
 	switch w.j.peek() {
 	case jsontext.KindBeginObject:
-		return w.object(key)
+		return w.object(key, at)
 	case jsontext.KindBeginArray:
 		if err := w.j.next(); err != nil {
 			return err
 		}
 		for w.j.peek() != jsontext.KindEndArray {
-			if err := w.value(key); err != nil {
+			if err := w.value(key, elsewhere); err != nil {
 				return err
 			}
 		}
@@ -462,7 +573,7 @@ func (w *opRedactor) value(key string) error {
 // decoded, redacted and encoded again. A member whose name a rule changes is
 // left out with its comma, so that two members can never end up with one
 // name.
-func (w *opRedactor) object(parent string) error {
+func (w *opRedactor) object(parent string, at opPath) error {
 	if err := w.j.next(); err != nil {
 		return err
 	}
@@ -476,7 +587,7 @@ func (w *opRedactor) object(parent string) error {
 		var renamed bool
 		if w.s.str(k, &renamed); !renamed {
 			kept = true
-			if err = w.member(parent, k); err != nil {
+			if err = w.member(parent, k, at); err != nil {
 				return err
 			}
 			continue
@@ -532,8 +643,8 @@ func (w *opRedactor) separatorBefore(i int, c byte) (int, error) {
 	return 0, errNoSeparator
 }
 
-// member reads the value of the member k of an object under parent.
-func (w *opRedactor) member(parent, k string) error {
+// member reads the value of the member k of an object under parent, at.
+func (w *opRedactor) member(parent, k string, at opPath) error {
 	isString := w.j.peek() == jsontext.KindString
 	switch {
 	case isCredentialName(k), parent == "build" && k == "def":
@@ -552,12 +663,72 @@ func (w *opRedactor) member(parent, k string) error {
 	case k == "args" && w.j.peek() == jsontext.KindBeginArray:
 		return w.args()
 	case k == "env" && w.j.peek() == jsontext.KindBeginArray:
-		return w.env()
+		return w.env(at == atMeta)
 	case isProxyName(k) && isString:
 		return w.string(func(x string) string { return w.s.proxy(x, w.withheld) })
+	case parent == "attrs" && isPathListAttr(k) && isString:
+		return w.string(func(x string) string { return w.s.stringList(x, w.withheld) })
 	default:
-		return w.value(k)
+		return w.value(k, at.child(k))
 	}
+}
+
+// isPathListAttr reports whether a source attribute holds a JSON list of
+// paths or patterns in a string, as BuildKit encodes these
+// (client/llb/source.go at v0.34.0).
+func isPathListAttr(k string) bool {
+	switch k {
+	case "local.followpaths", "local.excludepatterns", "local.includepattern":
+		return true
+	}
+	return false
+}
+
+// stringList redacts a JSON list of strings that is itself a string. Each
+// element is decoded and redacted on its own, so that the rules see its
+// text unescaped. A known value, or a fragment of one, withholds the whole
+// list: it is looked for
+// in the list's text, in the text of its redacted elements and in its
+// decoded elements joined with ",". The last finds one that encoding/json
+// escaped, as it escapes &, <, > and quotes, and one that spans elements,
+// as "a","b" spans two, even when it holds a quote, a backslash or a
+// control character, which both encoded forms escape. When nothing
+// changes, the list keeps its original text; a list that does not decode
+// is withheld whole.
+func (s scrubber) stringList(x string, withheld *bool) string {
+	var elems, decoded []string
+	changed := false
+	err := readStringList(x, func(v string) error {
+		var hit bool
+		decoded = append(decoded, v)
+		elems = append(elems, s.str(v, &hit))
+		changed = changed || hit
+		return nil
+	})
+	if err != nil {
+		*withheld = true
+		return withheldValue
+	}
+	out := []byte{'['}
+	for i, e := range elems {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		if out, err = jsontext.AppendQuote(out, e); err != nil {
+			*withheld = true
+			return withheldValue
+		}
+	}
+	out = append(out, ']')
+	switch {
+	case s.holds(x) || s.holds(string(out)) || s.holds(strings.Join(decoded, `","`)):
+		*withheld = true
+		return withheldValue
+	case !changed:
+		return x
+	}
+	*withheld = true
+	return string(out)
 }
 
 // args reads the arguments of a command. An argument after an option that
@@ -571,7 +742,7 @@ func (w *opRedactor) args() error {
 	for w.j.peek() != jsontext.KindEndArray {
 		if w.j.peek() != jsontext.KindString {
 			prev = ""
-			if err := w.value("args"); err != nil {
+			if err := w.value("args", elsewhere); err != nil {
 				return err
 			}
 			continue
@@ -607,16 +778,21 @@ func (s scrubber) arg(option, x string, withheld *bool) string {
 
 // env reads a list of NAME=VALUE entries. It withholds the value of each
 // entry whose name looks like a credential, and redacts proxy settings.
-func (w *opRedactor) env() error {
+// When read is set, as for Op.exec.meta.env, it notes the position of each
+// entry it changes.
+func (w *opRedactor) env(read bool) error {
 	if err := w.j.next(); err != nil {
 		return err
 	}
-	for w.j.peek() != jsontext.KindEndArray {
+	for i := 0; w.j.peek() != jsontext.KindEndArray; i++ {
 		var err error
 		if w.j.peek() == jsontext.KindString {
 			err = w.string(func(x string) string { return w.s.envEntry(x, w.withheld) })
+			if read && w.changed {
+				w.changedEnv = append(w.changedEnv, i)
+			}
 		} else {
-			err = w.value("env")
+			err = w.value("env", elsewhere)
 		}
 		if err != nil {
 			return err
@@ -629,6 +805,7 @@ func (w *opRedactor) env() error {
 // A string longer than maxStringBytes is withheld whole without being
 // unquoted.
 func (w *opRedactor) string(redact func(string) string) error {
+	w.changed = false
 	raw, err := w.j.readValue()
 	if err != nil {
 		return err
@@ -636,6 +813,7 @@ func (w *opRedactor) string(redact func(string) string) error {
 	end := w.j.offset()
 	if len(raw) > maxStringBytes {
 		*w.withheld = true
+		w.changed = true
 		w.replace(end-len(raw), end, []byte(`"`+withheldValue+`"`))
 		return nil
 	}
@@ -651,6 +829,7 @@ func (w *opRedactor) string(redact func(string) string) error {
 	if err != nil {
 		return fmt.Errorf("quoting a redacted string: %w", err)
 	}
+	w.changed = true
 	w.replace(end-len(raw), end, quoted)
 	return nil
 }
@@ -661,13 +840,13 @@ func (s scrubber) envEntry(entry string, withheld *bool) string {
 }
 
 // encoded redacts base64 data as text. Data that is not valid base64 is
-// withheld, and so is data whose encoded text holds a known value, before
-// or after redaction, which can happen by chance. Only known values are
-// checked in the encoded text, because the other rules would match random
-// base64.
+// withheld, and so is data whose encoded text holds a known value or a
+// fragment of one, before or after redaction, which can happen by chance.
+// Only known values are checked in the encoded text, because the other
+// rules would match random base64.
 func (s scrubber) encoded(enc string, withheld *bool) string {
 	data, err := base64.StdEncoding.DecodeString(enc)
-	if err != nil || (s.known != nil && s.known.contains(enc)) {
+	if err != nil || s.holds(enc) {
 		*withheld = true
 		return withheldValue
 	}
@@ -678,10 +857,24 @@ func (s scrubber) encoded(enc string, withheld *bool) string {
 	}
 	*withheld = true
 	out := base64.StdEncoding.EncodeToString([]byte(text))
-	if s.known != nil && s.known.contains(out) {
+	if s.holds(out) {
 		return withheldValue
 	}
 	return out
+}
+
+// validText returns text with each run of bytes that are not valid UTF-8
+// replaced by one replacement character. A Dockerfile is bytes, but JSON is
+// UTF-8, so a snapshot that kept them would read back with other text. It
+// runs before redaction, so that redaction reads the text that is kept: a
+// replacement character can complete a known value.
+func validText(text string) string {
+	return strings.ToValidUTF8(text, string(utf8.RuneError))
+}
+
+// holds reports whether text holds a known value or a fragment of one.
+func (s scrubber) holds(text string) bool {
+	return (s.known != nil && s.known.contains(text)) || sharesFragment(s.fragments, text)
 }
 
 // isProxyName reports whether a name is a proxy setting, such as
@@ -707,8 +900,8 @@ func (s scrubber) text(x string, withheld *bool) string {
 	return s.scrub(x, withheld, textRules)
 }
 
-// scrub removes the known values and what the rules mark from x, and sets
-// *withheld when any applied. Every rule reads x itself, and each run of
+// scrub removes the known values, their fragments and what the rules mark
+// from x, and sets *withheld when any applied. Every rule reads x itself, and each run of
 // bytes that any of them marks is replaced once, so no rule can change the
 // text that another reads.
 //
@@ -737,6 +930,7 @@ func (s scrubber) scrubWithin(x string, withheld *bool, r ruleSet, rereads int) 
 	}
 	m := mask{n: len(x)}
 	known := s.known != nil && s.known.mark(x, &m)
+	known = s.fragments.mark(x, &m) || known
 	if known {
 		m.markApplied(x, r)
 	}

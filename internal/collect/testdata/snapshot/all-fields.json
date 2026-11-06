@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "fingerprintVersion": 1,
+  "provenance": "read",
+  "platforms": [
+    {
+      "platform": "linux/***",
+      "withheld": true,
+      "steps": [
+        {
+          "op": "source",
+          "sourceKind": "image",
+          "vertex": -1,
+          "environment": -1,
+          "fingerprints": {
+            "command": "dbdac32071dd641c31440a10c7afeaf8b3d3fba9de28401331ec5a30bcb9a93a",
+            "other": "b4329afcf7f1531fbd83900dcf40bb95f197a3af30c0d687ba28b8aab5657366",
+            "ancestor": "aa323bd40c5908c1ad660bc4876a9c49703295c87e59700c9bb46b6ca1d093a6"
+          }
+        }
+      ],
+      "environments": [],
+      "contexts": []
+    },
+    {
+      "platform": "linux/amd64",
+      "steps": [
+        {
+          "op": "source",
+          "sourceKind": "image",
+          "text": "FROM alpine:3.22",
+          "lines": {
+            "start": 1,
+            "end": 1
+          },
+          "vertex": 0,
+          "environment": -1,
+          "fingerprints": {
+            "command": "dbdac32071dd641c31440a10c7afeaf8b3d3fba9de28401331ec5a30bcb9a93a",
+            "other": "b4329afcf7f1531fbd83900dcf40bb95f197a3af30c0d687ba28b8aab5657366",
+            "ancestor": "aa323bd40c5908c1ad660bc4876a9c49703295c87e59700c9bb46b6ca1d093a6"
+          }
+        },
+        {
+          "op": "source",
+          "sourceKind": "local",
+          "vertex": 1,
+          "environment": -1,
+          "fingerprints": {
+            "command": "71b382bbd5b81279459ff71c346e599f336d6baf973b70ee2ab2e468bbc74777",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "5d80249b61fd79e8086271a6520883035bb65ffc46c3dc7abd3534ae6a0eac81"
+          },
+          "fromLocalContext": true
+        },
+        {
+          "op": "source",
+          "sourceKind": "git",
+          "vertex": -1,
+          "environment": -1,
+          "fingerprints": {
+            "command": "68fc7f58b5a567421839f007307659ebfca9bca40c12ae099ae0c3d726f3baf2",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "71c4600c5ce3c387b6bad394bc1f3cdac4c4e615e2c2d0ebb144d91929d9691f"
+          },
+          "fromGit": true
+        },
+        {
+          "op": "source",
+          "sourceKind": "http",
+          "vertex": -1,
+          "environment": -1,
+          "fingerprints": {
+            "command": "c047341a01250a190a256db90e996b9bfec03ca79d259060516acffff66ea37f",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "ed9a1ee0ae6e2defade46174b42d69b8ff0220323a1aed87edda7fc8ce2ea999"
+          },
+          "fromHTTP": true
+        },
+        {
+          "op": "exec",
+          "text": "RUN make",
+          "lines": {
+            "start": 2,
+            "end": 3
+          },
+          "vertex": 2,
+          "inputs": [
+            0,
+            1
+          ],
+          "environment": 0,
+          "fingerprints": {
+            "command": "30d11ec0c12d83bb993ac6edf987821fc439b053bb0153ebbd65f92a0c122fed",
+            "other": "5afc96c7a569a33ac8d0d166d36c22237904364c53355e2f1e1be86ea52bb0cf",
+            "ancestor": "885eac6b9238e8db2801d68a8a6c8fcfa5426be6c2e5434bf8e04132332edd3b"
+          },
+          "withheld": true,
+          "withheldAncestor": true,
+          "fromLocalContext": true,
+          "sources": [
+            {
+              "context": 0,
+              "path": "go.mod"
+            }
+          ]
+        },
+        {
+          "op": "file",
+          "text": "COPY config.txt .",
+          "lines": {
+            "start": 4,
+            "end": 4
+          },
+          "vertex": 0,
+          "inputs": [
+            4,
+            1
+          ],
+          "environment": -1,
+          "fingerprints": {
+            "command": "145cd66a23226ef1799b70f0a2c4aaf6e32764d724cf297819333962d3e67c9f",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "5e604f989976f204106766d6b1fce524286ab1061ee6aa8da0a16255b49dcc19"
+          },
+          "withheldAncestor": true,
+          "fromLocalContext": true,
+          "sources": [
+            {
+              "context": 0,
+              "path": "a"
+            }
+          ]
+        },
+        {
+          "op": "merge",
+          "vertex": -1,
+          "inputs": [
+            2,
+            3
+          ],
+          "environment": -1,
+          "fingerprints": {
+            "command": "253091b73fd18d987783c6ddedcdd73fb3dfae6ed1216fa351fdbe428ab37a3e",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "2211f170851085fe8a716277061bbb126679b88a62f557de65c57372ba0dd71b"
+          },
+          "fromGit": true,
+          "fromHTTP": true
+        },
+        {
+          "op": "source",
+          "sourceKind": "local",
+          "vertex": -1,
+          "environment": -1,
+          "fingerprints": {
+            "command": "86619814fe1bfa20be0f55baf4f3f44939e76da614db3bffd497c9be0132b670",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "1c7e8c80a22d7660ba93c9a870c319065396f3237921f3ea4ab28d64eda40153"
+          },
+          "fromLocalContext": true
+        },
+        {
+          "op": "source",
+          "sourceKind": "other",
+          "vertex": -1,
+          "environment": -1,
+          "fingerprints": {
+            "command": "2c84fa1c27a9d9d2059f48193a844646efe14a8989f3b9e1f7498da1524d1f1a",
+            "other": "a903a332c5247428d15d7454cb22263d6969416e4f8bc068e4df0a87b2b9d4cc",
+            "ancestor": "6218b3ba1a425d67d2fdcbb293255c1a816f559ab26fe82d6b74099141de4f35"
+          }
+        }
+      ],
+      "environments": [
+        [
+          {
+            "name": "API_TOKEN",
+            "withheld": true
+          },
+          {
+            "name": "DB",
+            "withheld": true
+          },
+          {
+            "name": "PATH",
+            "value": "f71bc7afe5647a2955f19c41dff51d07d8db1cb1e8c6578df9eef1074792a091"
+          }
+        ]
+      ],
+      "contexts": [
+        {
+          "name": "context",
+          "steps": [
+            1
+          ],
+          "dir": "services/api",
+          "ignorePatterns": [
+            "*.log"
+          ]
+        },
+        {
+          "name": "assets",
+          "steps": [
+            7
+          ],
+          "withheld": true
+        }
+      ]
+    }
+  ],
+  "vertices": [
+    {
+      "kind": "step",
+      "cached": true,
+      "started": "2023-11-14T22:13:20.000000005Z",
+      "completed": "2023-11-14T22:13:21Z"
+    },
+    {
+      "kind": "internal",
+      "started": "2023-11-14T22:13:20Z",
+      "completed": "2023-11-14T22:13:20.000000001Z"
+    },
+    {
+      "kind": "step",
+      "lostHit": true,
+      "errored": true,
+      "started": "2023-11-14T22:13:22Z",
+      "completed": "2023-11-14T22:13:23Z"
+    },
+    {
+      "kind": "cache-import",
+      "errored": true
+    },
+    {
+      "kind": "cache-export",
+      "started": "2023-11-14T22:13:24Z"
+    }
+  ],
+  "cache": {
+    "imports": [
+      {
+        "type": "local"
+      },
+      {
+        "type": "registry"
+      },
+      {
+        "type": "gha"
+      },
+      {
+        "type": "s3"
+      },
+      {
+        "type": "azblob"
+      },
+      {
+        "type": "unknown"
+      }
+    ],
+    "noCache": {
+      "stages": [
+        "build",
+        "***"
+      ],
+      "withheld": true
+    }
+  },
+  "buildArgs": [
+    {
+      "name": "API_TOKEN",
+      "withheld": true
+    },
+    {
+      "name": "MODE",
+      "value": "93f5db5360adc17bc32af21b424eb45f41f7069b8005d660e53c2893ac9fcbd5"
+    },
+    {
+      "name": "SOURCE_DATE_EPOCH",
+      "value": "0a9e4768f0c8d6c78bcfebefa925b823a694b48d86b1ae7f4accfe9c8db5d648"
+    }
+  ],
+  "commit": "0123456789012345678901234567890123456789",
+  "dirty": true,
+  "sourceDateEpoch": 1700000000
+}

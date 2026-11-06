@@ -98,3 +98,24 @@ func FuzzKnownSet(f *testing.F) {
 		}
 	})
 }
+
+func TestFragmentSet(t *testing.T) {
+	f := newFragmentSet([]string{"abcdefghij", "short", "12345678"})
+	for text, want := range map[string]bool{
+		"abcdefgh": true, "xxbcdefghiyy": true, "cdefghij": true, "x12345678": true, "abcdefghij": true,
+		"abcdefg": false, "bcdefgh": false, "abcdefgX": false, "short-and-longer": false, "": false, "1234567": false,
+	} {
+		if got := sharesFragment(f, text); got != want {
+			t.Errorf("sharesFragment(%q) = %v, want %v", text, got, want)
+		}
+		if got := sharesFragment(f, []byte(text)); got != want {
+			t.Errorf("sharesFragment([]byte(%q)) = %v, want %v", text, got, want)
+		}
+	}
+	if newFragmentSet([]string{"short", "1234567"}) != nil || sharesFragment((*fragmentSet)(nil), "abcdefgh") {
+		t.Error("values shorter than a run gave runs")
+	}
+	if n := testing.AllocsPerRun(100, func() { sharesFragment(f, "services/api/main.go") }); n != 0 {
+		t.Errorf("sharesFragment() allocates %v times, want 0", n)
+	}
+}

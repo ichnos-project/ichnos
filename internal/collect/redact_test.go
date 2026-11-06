@@ -2,6 +2,7 @@ package collect
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/json/jsontext"
@@ -18,11 +19,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
+
+	"github.com/ichnos-project/ichnos/pkg/snapshot"
 )
 
 func mustRedact(tb testing.TB, r *Record) redacted {
 	tb.Helper()
-	out, err := redact(r)
+	out, err := redact(tb.Context(), r)
 	if err != nil {
 		tb.Fatalf("redact() error = %v", err)
 	}
@@ -257,6 +261,20 @@ func (b *bundle) rawText() string {
 	return sb.String()
 }
 
+// plantPattern makes secret the value of a credential build argument, and
+// adds pattern to the .dockerignore patterns of the main build context,
+// encoded as BuildKit encodes them, with encoding/json, which escapes &, <,
+// > and quotes.
+func plantPattern(tb testing.TB, b *bundle, secret, pattern string) {
+	tb.Helper()
+	b.editAttrs(func(a map[string]any) { a["build-arg:API_TOKEN"] = secret })
+	b.editOps("source", func(op map[string]any) {
+		if op["identifier"] == "local://context" {
+			child(op, "attrs")["local.excludepatterns"] = string(mustJSON(tb, []string{"*.log", pattern}))
+		}
+	})
+}
+
 func TestPlantedSecrets(t *testing.T) {
 	fixture := fixturePath(t, "control", "pr")
 	tests := []struct {
@@ -375,6 +393,38 @@ func TestPlantedSecrets(t *testing.T) {
 			})
 			if !copied {
 				t.Fatal("fixture has no COPY step")
+			}
+		}},
+		{"provenance RUN mount selector", true, func(b *bundle, v string) {
+			b.editAttrs(func(a map[string]any) { a["build-arg:API_TOKEN"] = v })
+			mounted := false
+			b.editProvenance(func(p map[string]any) {
+				defs, _ := child(child(child(p, "buildDefinition"), "internalParameters"), "buildConfig")["llbDefinition"].([]any)
+				context := ""
+				for _, d := range defs {
+					op, _ := asMap(d)["op"].(map[string]any)
+					ops, _ := op["Op"].(map[string]any)
+					if src, ok := ops["source"].(map[string]any); ok && src["identifier"] == "local://context" {
+						context, _ = asMap(d)["id"].(string)
+					}
+				}
+				for _, d := range defs {
+					def := asMap(d)
+					op, _ := def["op"].(map[string]any)
+					ops, _ := op["Op"].(map[string]any)
+					exec, ok := ops["exec"].(map[string]any)
+					if !ok || mounted || context == "" {
+						continue
+					}
+					inputs, _ := def["inputs"].([]any)
+					def["inputs"] = append(inputs, context+":0")
+					mounts, _ := exec["mounts"].([]any)
+					exec["mounts"] = append(mounts, map[string]any{"input": len(inputs), "selector": "/" + v + ".txt", "dest": "/mnt", "output": -1, "readonly": true})
+					mounted = true
+				}
+			})
+			if !mounted {
+				t.Fatal("fixture has no RUN step and build context")
 			}
 		}},
 		{"provenance heredoc with a build argument", true, func(b *bundle, v string) {
@@ -517,23 +567,112 @@ func TestPlantedSecrets(t *testing.T) {
 				h["externalError"] = map[string]any{"media_type": "application/vnd.googeapis.google.rpc.status+proto", "size": len(data)}
 			})
 		}},
+		{"history vcs:localdir name", true, func(b *bundle, v string) {
+			b.editAttrs(func(a map[string]any) {
+				a["build-arg:API_TOKEN"] = v
+				a["vcs:localdir:"+v] = "app"
+			})
+		}},
+		{"history vcs:localdir of a credential-named context", true, func(b *bundle, v string) {
+			b.editAttrs(func(a map[string]any) { a["vcs:localdir:API_TOKEN"] = "dir-" + v })
+			b.editOps("source", func(op map[string]any) {
+				if op["identifier"] == "local://context" {
+					op["identifier"] = "local://API_TOKEN"
+				}
+			})
+		}},
+		{"history vcs:localdir directory", true, func(b *bundle, v string) {
+			b.editAttrs(func(a map[string]any) {
+				a["build-arg:API_TOKEN"] = v
+				a["vcs:localdir:context"] = "services/" + v
+			})
+		}},
+		{"history no-cache", true, func(b *bundle, v string) {
+			b.editAttrs(func(a map[string]any) {
+				a["build-arg:API_TOKEN"] = v
+				a["no-cache"] = "stage-" + v
+			})
+		}},
+		{"history vcs:revision", true, func(b *bundle, v string) {
+			b.editAttrs(func(a map[string]any) {
+				a["build-arg:API_TOKEN"] = v
+				a["vcs:revision"] = v
+			})
+		}},
+		{"provenance local context name", true, func(b *bundle, v string) {
+			b.editAttrs(func(a map[string]any) { a["build-arg:API_TOKEN"] = v })
+			b.editOps("source", func(op map[string]any) {
+				if op["identifier"] == "local://context" {
+					op["identifier"] = "local://" + v
+				}
+			})
+		}},
+		{"provenance targetPlatform", true, func(b *bundle, v string) {
+			b.editAttrs(func(a map[string]any) { a["build-arg:API_TOKEN"] = v })
+			b.editProvenance(func(p map[string]any) {
+				child(child(p, "buildDefinition"), "internalParameters")["targetPlatform"] = "linux/" + v
+			})
+		}},
+		{"provenance environment variable name", true, func(b *bundle, v string) {
+			b.editAttrs(func(a map[string]any) { a["build-arg:API_TOKEN"] = v })
+			b.editOps("exec", func(op map[string]any) {
+				meta := child(op, "meta")
+				env, _ := meta["env"].([]any)
+				meta["env"] = append(env, v+"_MODE=fast")
+			})
+		}},
+		{"provenance .dockerignore pattern", true, func(b *bundle, v string) {
+			plantPattern(t, b, v, v)
+		}},
+		{"provenance .dockerignore pattern with an escaped &", true, func(b *bundle, v string) {
+			plantPattern(t, b, v+"&q", v+"&q")
+		}},
+		{"provenance .dockerignore pattern with an escaped quote", true, func(b *bundle, v string) {
+			plantPattern(t, b, v+`"q`, v+`"q`)
+		}},
+		{"provenance secret split across two .dockerignore patterns", true, func(b *bundle, v string) {
+			b.editAttrs(func(a map[string]any) { a["build-arg:API_TOKEN"] = v + `","` + v + "x" })
+			b.editOps("source", func(op map[string]any) {
+				if op["identifier"] == "local://context" {
+					child(op, "attrs")["local.excludepatterns"] = string(mustJSON(t, []string{v, v + "x"}))
+				}
+			})
+		}},
+		{"provenance followpaths with an escaped &", true, func(b *bundle, v string) {
+			b.editAttrs(func(a map[string]any) { a["build-arg:API_TOKEN"] = v + "&q" })
+			b.editOps("source", func(op map[string]any) {
+				if op["identifier"] == "local://context" {
+					child(op, "attrs")["local.followpaths"] = string(mustJSON(t, []string{"app.txt", v + "&q"}))
+				}
+			})
+		}},
 	}
 	seen := map[string]bool{}
+	collectPlanted := func(t *testing.T, plant func(*bundle, string), value string) (*bundle, *Record) {
+		t.Helper()
+		b := loadBundle(t, fixture)
+		plant(b, value)
+		path := filepath.Join(t.TempDir(), "planted.dockerbuild")
+		b.write(t, path)
+		rec, err := NewBundleCollector().Collect(t.Context(), Source{Path: path})
+		if err != nil {
+			t.Fatalf("Collect() error = %v", err)
+		}
+		return b, rec
+	}
 	for i, tt := range tests {
 		t.Run(tt.site, func(t *testing.T) {
-			value := fmt.Sprintf("ichnos-fake-secret-%02d", i)
+			// Two secrets that differ in one digit must give the same
+			// snapshot, or a fingerprint covers what redaction left of one.
+			value, other := fmt.Sprintf("ichnos-fake-secret-%02d-1", i), fmt.Sprintf("ichnos-fake-secret-%02d-2", i)
 			if seen[value] {
 				t.Fatalf("value %q is not distinct", value)
 			}
 			seen[value] = true
-			b := loadBundle(t, fixture)
-			tt.plant(b, value)
-			path := filepath.Join(t.TempDir(), "planted.dockerbuild")
-			b.write(t, path)
-
-			rec, err := NewBundleCollector().Collect(t.Context(), Source{Path: path})
-			if err != nil {
-				t.Fatalf("Collect() error = %v", err)
+			b, rec := collectPlanted(t, tt.plant, value)
+			_, otherRec := collectPlanted(t, tt.plant, other)
+			if got, want := mustJSON(t, mustSnapshot(t, rec)), mustJSON(t, mustSnapshot(t, otherRec)); !bytes.Equal(got, want) {
+				t.Errorf("snapshots of two secrets differ:\n%s\n%s", got, want)
 			}
 			if tt.decoded {
 				if !strings.Contains(dumpRecord(rec), value) {
@@ -543,7 +682,10 @@ func TestPlantedSecrets(t *testing.T) {
 				t.Fatalf("the planted value is not in the raw record")
 			}
 
-			outputs := map[string]string{"redacted": dumpRedacted(mustRedact(t, rec))}
+			outputs := map[string]string{
+				"redacted":      dumpRedacted(mustRedact(t, rec)),
+				"snapshot JSON": string(mustJSON(t, mustSnapshot(t, rec))),
+			}
 			for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
 				outputs["Record "+verb] = fmt.Sprintf(verb, rec)
 				outputs["*Record "+verb] = fmt.Sprintf(verb, *rec)
@@ -561,6 +703,13 @@ func TestPlantedSecrets(t *testing.T) {
 				} {
 					if strings.Contains(out, encoded) {
 						t.Errorf("%s holds the %s value", name, form)
+					}
+				}
+			}
+			for _, name := range []string{"redacted", "snapshot JSON"} {
+				for i := 0; i+fragmentBytes <= len(value); i++ {
+					if strings.Contains(outputs[name], value[i:i+fragmentBytes]) {
+						t.Errorf("%s holds %q of the value", name, value[i:i+fragmentBytes])
 					}
 				}
 			}
@@ -593,6 +742,18 @@ func TestPlantedSecretsInErrors(t *testing.T) {
 		"bad step reference": func(b *bundle) {
 			b.editProvenance(func(p map[string]any) {
 				child(child(child(p, "buildDefinition"), "internalParameters"), "buildConfig")["digestMapping"] = map[string]any{value: value}
+			})
+		},
+		"step input": func(b *bundle) {
+			b.editProvenance(func(p map[string]any) {
+				defs, _ := child(child(child(p, "buildDefinition"), "internalParameters"), "buildConfig")["llbDefinition"].([]any)
+				asMap(defs[1])["inputs"] = []any{value + ":0"}
+			})
+		},
+		"step input output": func(b *bundle) {
+			b.editProvenance(func(p map[string]any) {
+				defs, _ := child(child(child(p, "buildDefinition"), "internalParameters"), "buildConfig")["llbDefinition"].([]any)
+				asMap(defs[1])["inputs"] = []any{"step0:" + value}
 			})
 		},
 		"status": func(b *bundle) {
@@ -848,6 +1009,22 @@ func TestRedactTimeIsLinear(t *testing.T) {
 // withholds x whole.
 func naiveScrub(known []string, x string, r ruleSet) (string, bool) {
 	covered := naiveCover(known, x)
+	for i := 0; i+fragmentBytes <= len(x); i++ {
+		for _, v := range known {
+			if len(v) >= fragmentBytes && strings.Contains(v, x[i:i+fragmentBytes]) {
+				start, end := i, i+fragmentBytes
+				for k := 1; k < utf8.UTFMax && start > 0 && !utf8.RuneStart(x[start]); k++ {
+					start--
+				}
+				for k := 1; k < utf8.UTFMax && end < len(x) && !utf8.RuneStart(x[end]); k++ {
+					end++
+				}
+				for j := start; j < end; j++ {
+					covered[j] = true
+				}
+			}
+		}
+	}
 	hasKnown := slices.Contains(covered, true)
 	if hasKnown {
 		naiveReread(x, covered, r)
@@ -918,6 +1095,10 @@ func FuzzScrub(f *testing.F) {
 	f.Add("", "", "?TOKEN:=", uint8(proxyRules))
 	f.Add("0000", "", "0://0://0://0@0", uint8(textRules))
 	f.Add("abcd", "cdef", "ENV API_TOKEN abcdef ghij", uint8(textRules))
+	f.Add(`ab"cd`, "", `TOKEN="ab"cd correct horse battery"`, uint8(stringRules))
+	f.Add(`zzab"cdefg`, "", `TOKEN="ab"cdefg correct horse battery"`, uint8(stringRules))
+	f.Add("p@ss", "", "HTTPS_PROXY=http://proxy.example:3128/?user=p@ss&Expires=1730000000&Signature=abcdef0123", uint8(envRules))
+	f.Add("zzp@ssw0rd9", "", "HTTPS_PROXY=http://proxy.example:3128/?user=p@ssw0rd9&Signature=abcdef0123", uint8(envRules))
 	f.Fuzz(func(t *testing.T, k1, k2, x string, kind uint8) {
 		r := ruleSet(kind % 4)
 		s, err := newScrubber(&Record{&recordData{attrs: map[string]string{"build-arg:API_TOKEN": k1, "build-arg:OTHER_TOKEN": k2}}})
@@ -935,12 +1116,20 @@ func FuzzScrub(f *testing.F) {
 		if want, hit := naiveScrub(known, x, r); got != want || withheld != hit {
 			t.Fatalf("scrub(%q) with %q = %q, %v, want %q, %v", x, known, got, withheld, want, hit)
 		}
+		if utf8.ValidString(x) && !utf8.ValidString(got) {
+			t.Fatalf("scrub(%q) with %q = %q, which is not valid UTF-8", x, known, got)
+		}
 		if strings.Contains(k1+k2, "*") {
 			return
 		}
 		for _, v := range known {
 			if strings.Contains(got, v) {
 				t.Fatalf("scrub(%q) = %q, which holds the known value %q", x, got, v)
+			}
+			for i := 0; i+fragmentBytes <= len(v); i++ {
+				if strings.Contains(got, v[i:i+fragmentBytes]) {
+					t.Fatalf("scrub(%q) = %q, which holds %q of the known value %q", x, got, v[i:i+fragmentBytes], v)
+				}
 			}
 		}
 		if twice := s.scrub(got, &withheld, r); twice != got {
@@ -1261,7 +1450,7 @@ func TestRedactOpTruncated(t *testing.T) {
 			attrs:  map[string]string{"build-arg:API_TOKEN": value},
 			builds: []build{{steps: []step{{op: jsontext.Value(op[:i])}}}},
 		}}
-		_, err := redact(rec)
+		_, err := redact(t.Context(), rec)
 		if !errors.Is(err, ErrMalformedRecord) || strings.Contains(err.Error(), value) || strings.Contains(err.Error(), "Op") {
 			t.Fatalf("redact() of the first %d bytes error = %v, want ErrMalformedRecord with no record bytes", i, err)
 		}
@@ -1535,7 +1724,7 @@ func TestRedactKnownValueLimits(t *testing.T) {
 		{"short values do not count", short, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := redact(&Record{&recordData{attrs: tt.attrs}})
+			_, err := redact(t.Context(), &Record{&recordData{attrs: tt.attrs}})
 			if tt.wantErr == nil {
 				if err != nil {
 					t.Fatalf("redact() error = %v, want nil", err)
@@ -1673,6 +1862,159 @@ func TestRedactVertexKinds(t *testing.T) {
 	}
 }
 
+// TestScrubReadsWithValuesRemoved checks that the rules read a string with
+// its known values and fragments removed before they read it as it is. A
+// quote or an @ in a value would otherwise read as syntax, and the span the
+// rules mark from it would cover the TOKEN= or the ? that the second reading
+// needs, which leaves the rest of the credential.
+func TestScrubReadsWithValuesRemoved(t *testing.T) {
+	for _, tt := range []struct {
+		known, in, want string
+		r               ruleSet
+	}{
+		{`ab"cd`, `RUN TOKEN="ab"cd correct horse battery" make`, `RUN TOKEN=*** make`, textRules},
+		{`zzab"cdefg`, `RUN TOKEN="ab"cdefg correct horse battery" make`, `RUN TOKEN=*** make`, textRules},
+		{
+			"p@ss", "HTTPS_PROXY=http://proxy.example:3128/?user=p@ss&Expires=1730000000&Signature=abcdef0123",
+			"HTTPS_PROXY=http://***&Expires=***&Signature=***", envRules,
+		},
+		{
+			"zzp@ssw0rd9", "HTTPS_PROXY=http://proxy.example:3128/?user=p@ssw0rd9&Signature=abcdef0123",
+			"HTTPS_PROXY=http://***&Signature=***", envRules,
+		},
+	} {
+		s, err := newScrubber(&Record{&recordData{attrs: map[string]string{"build-arg:API_TOKEN": tt.known}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var withheld bool
+		if got := s.scrub(tt.in, &withheld, tt.r); got != tt.want || !withheld {
+			t.Errorf("scrub(%q) with %q = %q, %v, want %q", tt.in, tt.known, got, withheld, tt.want)
+		}
+	}
+}
+
+// TestRedactFragments checks that every run of 8 bytes of a known value of
+// 8 bytes or more is removed from a string, in plain text, in a path list
+// and in base64 data, and that a shorter value is removed only whole. The
+// rules read a string again with its fragments removed, as with whole
+// values, because a fragment can split what they look for, as a / in a
+// password splits a URL.
+func TestRedactFragments(t *testing.T) {
+	const (
+		planted = "ichnos-fake-token-123456"
+		short   = "abcdef1"
+		slashed = "pa/ssword-1234"
+		copied  = "a\u00a923456789"
+		accent  = "a1234567\u00e8"
+	)
+	s, err := newScrubber(&Record{&recordData{attrs: map[string]string{"build-arg:API_TOKEN": planted, "build-arg:NPM_TOKEN": short, "build-arg:GH_TOKEN": slashed, "build-arg:GITLAB_TOKEN": copied, "build-arg:QUAY_TOKEN": accent}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for in, want := range map[string]string{
+		"x ichnos-fake-token-12345 y":        "x *** y",
+		"chnos-fake-token-123456":            "***",
+		"/fake-token/x":                      "/***/x",
+		"token-1 and token-12":               "token-1 and ***",
+		"abcdef abcdef1 bcdef1":              "abcdef *** bcdef1",
+		"https://h.example/f":                "https://h.example/f",
+		"ichnos-fake-token-123456-xyz":       "***-xyz",
+		"https://u:a/ssword-1234@h.example/": "https://***@h.example/",
+		"X\u00e923456789":                    "X***",
+		"X1234567\u00e9Y":                    "X***Y",
+	} {
+		var withheld bool
+		if got := s.str(in, &withheld); got != want || withheld != (got != in) || !utf8.ValidString(got) {
+			t.Errorf("str(%q) = %q, %v, want %q", in, got, withheld, want)
+		}
+	}
+	var withheld bool
+	if got := s.stringList(`["a","fake-token"]`, &withheld); got != withheldValue || !withheld {
+		t.Errorf("stringList() of a fragment = %q, %v, want it withheld", got, withheld)
+	}
+	enc := base64.StdEncoding.EncodeToString([]byte("echo fake-token-12 > /x"))
+	withheld = false
+	got := s.encoded(enc, &withheld)
+	data, err := base64.StdEncoding.DecodeString(got)
+	if err != nil || string(data) != "echo *** > /x" || !withheld {
+		t.Errorf("encoded() of a fragment = %q, %v, want echo *** > /x", data, withheld)
+	}
+}
+
+// TestRedactPathLists checks the source attributes that hold a JSON list in
+// a string: each element is redacted on its own, and a known value, even one
+// that encoding/json escaped or that spans elements, withholds the list.
+func TestRedactPathLists(t *testing.T) {
+	const (
+		planted = "ichnos-fake-path&value"
+		split   = `ichnos-fake-path","value`
+		spaced  = `ichnos-fake-path", "spaced`
+		slash   = `ichnos-fake-sec\","ret`
+		quote   = `ichnos-fake-quo"","ret`
+		parts   = `ab\","cd\","ef`
+	)
+	s, err := newScrubber(&Record{&recordData{attrs: map[string]string{
+		"build-arg:API_TOKEN": planted, "build-arg:NPM_TOKEN": split, "build-arg:GH_TOKEN": spaced,
+		"build-arg:GIT_TOKEN": slash, "build-arg:PYPI_TOKEN": quote, "build-arg:NUGET_TOKEN": parts,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		in, want string
+		withheld bool
+	}{
+		{`["a","b"]`, `["a","b"]`, false},
+		{`[ "a" , "\u0062" ]`, `[ "a" , "\u0062" ]`, false},
+		{`[]`, `[]`, false},
+		{`null`, `null`, false},
+		{`["a","ichnos-fake-path\u0026value/x"]`, withheldValue, true},
+		{`["https://user:pass@h.example/"]`, `["https://***@h.example/"]`, true},
+		{`["ichnos-fake-path","value"]`, withheldValue, true},
+		{`["ichnos-fake-path", "spaced"]`, withheldValue, true},
+		{`["ichnos-fake-sec\\","ret"]`, withheldValue, true},
+		{`["ichnos-fake-quo\"","ret"]`, withheldValue, true},
+		{`["ab\\","cd\\","ef"]`, withheldValue, true},
+		{`["a"`, withheldValue, true},
+		{`[1]`, withheldValue, true},
+		{`"a"`, withheldValue, true},
+	} {
+		var withheld bool
+		if got := s.stringList(tt.in, &withheld); got != tt.want || withheld != tt.withheld {
+			t.Errorf("stringList(%s) = %s, %v, want %s, %v", tt.in, got, withheld, tt.want, tt.withheld)
+		}
+	}
+}
+
+// TestRedactContextDirs checks that a build context directory that
+// redaction changes is marked as withheld.
+func TestRedactContextDirs(t *testing.T) {
+	const planted = "ichnos-fake-dir-value"
+	got := mustRedact(t, &Record{&recordData{attrs: map[string]string{
+		"build-arg:API_TOKEN":     planted,
+		"vcs:localdir:assets":     "assets",
+		"vcs:localdir:context":    "app/" + planted,
+		"vcs:localdir:" + planted: "x",
+	}}})
+	want := []contextDir{{name: "assets", dir: "assets"}, {name: "context", dir: "app/***", withheld: true}, {name: "***", withheld: true}}
+	if !slices.Equal(got.contextDirs, want) {
+		t.Errorf("contextDirs = %+v, want %+v", got.contextDirs, want)
+	}
+}
+
+func TestRedactCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	rec := mustCollect(t, fixturePath(t, "control", "pr"))
+	if _, err := redact(ctx, rec); !errors.Is(err, context.Canceled) {
+		t.Errorf("redact() error = %v, want context.Canceled", err)
+	}
+	if _, err := redact(ctx, &Record{&recordData{attrs: rec.attrs, vertices: rec.vertices}}); err != nil {
+		t.Errorf("redact() of a record with no steps error = %v, want nil", err)
+	}
+}
+
 func TestRedactIsPure(t *testing.T) {
 	path := fixturePath(t, "control", "pr")
 	rec, err := NewBundleCollector().Collect(t.Context(), Source{Path: path})
@@ -1688,8 +2030,12 @@ func TestRedactIsPure(t *testing.T) {
 	if twice := mustRedact(t, rec); !redactedEqual(once, twice) {
 		t.Errorf("redact() twice gave different results")
 	}
-	clear(rec.builds[0].steps[0].op)
-	rec.builds[0].steps[0].inputs = append(rec.builds[0].steps[0].inputs, "changed")
+	for i := range rec.builds[0].steps {
+		clear(rec.builds[0].steps[i].op)
+		for k := range rec.builds[0].steps[i].inputs {
+			rec.builds[0].steps[i].inputs[k].step = 99
+		}
+	}
 	if !redactedEqual(once, mustRedact(t, mustCollect(t, path))) {
 		t.Errorf("changing the Record after redact() changed the redacted value")
 	}
@@ -1768,7 +2114,7 @@ func TestRedactFixtures(t *testing.T) {
 			}
 			for j, rs := range rb.steps {
 				gs := gb.steps[j]
-				if gs.withheld || gs.id != rs.id || gs.text != rs.text || gs.lines != rs.lines || gs.vertex != rs.vertex ||
+				if gs.withheld || gs.text != rs.text || gs.lines != rs.lines || gs.vertex != rs.vertex ||
 					!slices.Equal(gs.inputs, rs.inputs) || !bytes.Equal(gs.op, rs.op) {
 					t.Errorf("%s: redact() changed step %q of a clean record", path, rs.id)
 				}
@@ -1854,6 +2200,7 @@ func FuzzRedactOp(f *testing.F) {
 	f.Add([]byte(`{"env":["AUTH_ENABLED=True"],"args":["--strict-ssl=True"]}`), "True")
 	f.Add([]byte(`{"u":"https://h/?000=1="}`), "00=1")
 	f.Add([]byte(`{"":"://0://0://@"}`), "0")
+	f.Add([]byte(`{"Op":{"source":{"identifier":"local://context","attrs":{"local.excludepatterns":"[\"abcd\\u0026efgh\"]"}}}}`), "abcd&efgh")
 	f.Fuzz(func(t *testing.T, raw []byte, known string) {
 		if !jsontext.Value(raw).IsValid(jsontext.AllowDuplicateNames(true)) {
 			return
@@ -1867,7 +2214,7 @@ func FuzzRedactOp(f *testing.F) {
 				attrs:  map[string]string{"build-arg:API_TOKEN": known},
 				builds: []build{{steps: []step{{op: op}}}},
 			}}
-			got, err := redact(rec)
+			got, err := redact(t.Context(), rec)
 			if err != nil {
 				t.Fatalf("redact() of the valid definition %q error = %v", op, err)
 			}
@@ -1887,15 +2234,107 @@ func FuzzRedactOp(f *testing.F) {
 			t.Fatalf("redact() of %q gave %q, then %q", op, once.op, twice.op)
 		}
 		tree := opTree(t, once.op)
+		if facts, err := newHasher(defaultSnapshotLimits()).readOp(once.op, once.changedEnv); err == nil {
+			checkChangedEnvWithheld(t, opTree(t, op), tree, facts.env)
+		}
 		if scrubbable(known) {
-			for _, s := range treeStrings(tree) {
+			for _, s := range slices.Concat(treeStrings(tree), pathListElements(tree), heredocData(t, tree)) {
 				if strings.Contains(s, known) {
 					t.Fatalf("redact() of %q kept the known value %q: %q", op, known, once.op)
+				}
+				for i := 0; i+fragmentBytes <= len(known); i++ {
+					if strings.Contains(s, known[i:i+fragmentBytes]) {
+						t.Fatalf("redact() of %q kept %q of the known value %q: %q", op, known[i:i+fragmentBytes], known, once.op)
+					}
 				}
 			}
 		}
 		checkCredentialMembers(t, tree)
 	})
+}
+
+// checkChangedEnvWithheld checks that every entry of Op.exec.meta.env that
+// redaction changed, between the decoded definitions before and after,
+// withholds its variable in env, the snapshot's view of after.
+func checkChangedEnvWithheld(tb testing.TB, before, after any, env []snapshot.EnvVar) {
+	tb.Helper()
+	list := func(v any) []any {
+		for _, k := range []string{"Op", "exec", "meta", "env"} {
+			m, _ := v.(map[string]any)
+			v = m[k]
+		}
+		l, _ := v.([]any)
+		return l
+	}
+	b, a := list(before), list(after)
+	if len(b) != len(a) {
+		return
+	}
+	for i := range a {
+		entry, ok := a[i].(string)
+		if !ok || a[i] == b[i] {
+			continue
+		}
+		name, _, _ := strings.Cut(entry, "=")
+		k := slices.IndexFunc(env, func(e snapshot.EnvVar) bool { return e.Name == name })
+		if k < 0 || !env[k].Withheld {
+			tb.Fatalf("redaction changed the entry %q of Op.exec.meta.env, but the snapshot keeps its variable: %+v", entry, env)
+		}
+	}
+}
+
+// heredocData returns the decoded data of every file that a definition
+// writes, which treeStrings sees only as base64.
+func heredocData(tb testing.TB, v any) []string {
+	tb.Helper()
+	var out []string
+	switch x := v.(type) {
+	case map[string]any:
+		for k, child := range x {
+			if mkfile, ok := child.(map[string]any); ok && k == "mkfile" {
+				if data, ok := mkfile["data"].(string); ok {
+					decoded, err := base64.StdEncoding.DecodeString(data)
+					if err != nil && data != withheldValue {
+						tb.Fatalf("redact() left file data that is not base64: %q", data)
+					}
+					out = append(out, string(decoded))
+				}
+			}
+			out = append(out, heredocData(tb, child)...)
+		}
+	case []any:
+		for _, child := range x {
+			out = append(out, heredocData(tb, child)...)
+		}
+	}
+	return out
+}
+
+// pathListElements returns the elements of every path list in the
+// attributes of a decoded definition, a JSON list in a string, which
+// treeStrings sees only encoded.
+func pathListElements(v any) []string {
+	var out []string
+	switch x := v.(type) {
+	case map[string]any:
+		for k, child := range x {
+			if attrs, ok := child.(map[string]any); ok && k == "attrs" {
+				for name, value := range attrs {
+					var list []string
+					if s, ok := value.(string); ok && isPathListAttr(name) && json.Unmarshal([]byte(s), &list) == nil {
+						out = append(out, list...)
+						out = append(out, strings.Join(list, `","`))
+					}
+				}
+			}
+			out = append(out, pathListElements(child)...)
+		}
+	case []any:
+		for _, child := range x {
+			out = append(out, pathListElements(child)...)
+		}
+	}
+	return out
 }
 
 // treeStrings returns every name and string in a decoded definition.
@@ -2116,7 +2555,7 @@ func benchmarkRedact(b *testing.B, records ...*Record) {
 	b.ReportAllocs()
 	for b.Loop() {
 		for _, r := range records {
-			if _, err := redact(r); err != nil {
+			if _, err := redact(b.Context(), r); err != nil {
 				b.Fatal(err)
 			}
 		}

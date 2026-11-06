@@ -32,6 +32,7 @@ Ichnos is not released yet. The planned setup is described in:
 
 - [Using Ichnos with GitHub Actions](docs/github-actions.md)
 - [Cache setup audit rules](docs/audit-rules.md)
+- [What a snapshot holds](docs/snapshot.md)
 
 The planned command-line interface:
 

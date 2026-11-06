@@ -161,9 +161,10 @@ A collector returns a raw `Record`, and one function in `collect` turns it into 
 
 A snapshot is Ichnos's own normalized view of one build. It shields every consumer from BuildKit's undocumented formats. It contains:
 
-- **Steps,** one list per platform: the Dockerfile text and location from BuildKit's provenance, the operation type, the cached flag, which is false for a step that reported an error, whether it lost a hit that way, start and end times, the kind (build step, cache import, cache export or internal), its fingerprints, and whether it descends from a local or Git build context. Step names are not stored, because BuildKit expands build arguments into them.
+- **Steps,** one list per platform: the Dockerfile text and location from BuildKit's provenance, the operation type, its vertex, its fingerprints, and whether it descends from a local or Git build context. Step names are not stored, because BuildKit expands build arguments into them.
+- **Vertices:** what BuildKit reported for each vertex, which a step reaches through its vertex: the cached flag, which is false for a vertex that reported an error, whether it lost a hit that way, start and end times, and the kind (build step, cache import, cache export or internal).
 - **Materials:** base images, remote `ADD` sources and Git sources, with their digests. URLs are stored as hashes.
-- **Build context:** its directory relative to the repository root, the `.dockerignore` patterns and the `COPY` and `ADD` sources. When the build context is on disk, each source that the patterns admit also has a fingerprint of its content.
+- **Build context:** its directory relative to the repository root, the `.dockerignore` patterns, the `COPY` and `ADD` sources, and sources mounted into `RUN` steps. When the build context is on disk, each source that the patterns admit also has a fingerprint of its content.
 - **Cache imports and exports:** each import with its type and whether it failed, as an error class and never the raw error; the `no-cache` setting with any stage filter; exports inferred from step names, because BuildKit does not store export settings.
 - **Build arguments:** names, with hashed values.
 - **`SOURCE_DATE_EPOCH`**, the built commit, the CI event and its cache mode, the builder versions and the fingerprint version.
@@ -330,7 +331,7 @@ gates:
 
 ### Testing Plan
 
-- Table-driven unit tests, and golden files for every renderer (`go test ./... -update`).
+- Table-driven unit tests, and golden files for every renderer (`ICHNOS_UPDATE_GOLDEN=1 go test ./...`).
 - CLI tests with `testscript` and `.txtar` files.
 - Native Go fuzz tests for every parser of untrusted input.
 - A compatibility corpus of recorded build records for each supported buildx version.
@@ -358,3 +359,4 @@ Ichnos holds the records it compares in memory. Parsers enforce size limits on r
 
 - 2026-10-28: proposal opened
 - 2026-11-02: replaced the digest rule with a comparison of step definitions, after the scenario lab disproved it
+- 2026-11-05: moved the cached flag, lost hit, times and kind from steps to vertices, and added sources mounted into `RUN` steps, to match snapshot schema 1
