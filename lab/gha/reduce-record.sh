@@ -201,7 +201,7 @@ edit "$record/index.json" "$repoint" --argjson moves "{$moves}"
 
 descriptors=$(jq -r --arg history "$blobs/$config" '
   (if input_filename == $history then "history" else "listed" end) as $tag |
-  .. | objects | select(has("digest") and has("size")) | "\($tag) \(.digest) \(.size)"' \
+  .. | objects | select(has("digest")) | "\($tag) \(.digest) \(.size)"' \
   "$record/index.json" "$blobs/$manifest" "$blobs/$config" 2>/dev/null) ||
   stop 'has a descriptor that does not match a blob'
 listed=$(awk '$1 == "listed" { print $2 }' <<<"$descriptors" | LC_ALL=C sort -u)

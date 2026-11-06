@@ -458,6 +458,15 @@ case_descriptor_with_another_size() {
   expect_stop 'descriptor with another size' 'has a descriptor that does not match a blob'
 }
 
+# case_descriptor_without_a_size leaves out the size in both descriptors of
+# the status stream, so that no descriptor checks the blob's size.
+case_descriptor_without_a_size() {
+  unpack "$control"
+  edit_json "$blobs/$manifest" "$(printf '(.layers[] | select(.mediaType == "%s")) |= del(.size)' "$status_type")"
+  edit_json "$blobs/$config" '.logs |= del(.size)'
+  expect_stop 'status stream listed without a size' 'has a descriptor that does not match a blob'
+}
+
 case_descriptor_of_a_missing_blob() {
   unpack "$control"
   edit_json "$blobs/$config" "$(printf '.planted = {digest: "sha256:%064d", size: 1}' 0)"
@@ -785,8 +794,13 @@ checks=()
 for name in $(declare -F | awk '$3 ~ /^case_/ { print $3 }'); do
   checks+=("$name")
 done
+expected_build_arg_stops=0
 for fixture in testdata/buildkit-*/*/*.dockerbuild; do
   checks+=("fixture=$fixture")
+  scenario=${fixture%/*}
+  case " $build_arg_scenarios " in
+    *" ${scenario##*/} "*) expected_build_arg_stops=$((expected_build_arg_stops + 1)) ;;
+  esac
 done
 for value in "${secrets[@]}"; do
   checks+=("secret=$value")
@@ -827,6 +841,8 @@ for check in "${checks[@]}"; do
 done
 [ "$failed" -eq 0 ] || fail "reduce-record: $failed of $n checks failed"
 [ "$with_builds" -gt 0 ] || fail 'no fixture has builds, so none checks that the collector reads them'
-[ "$build_arg_stops" -eq 4 ] || fail "expected the build argument stop on 4 fixtures, not $build_arg_stops"
+[ "$expected_build_arg_stops" -gt 0 ] || fail 'no fixture is a build argument scenario'
+[ "$build_arg_stops" -eq "$expected_build_arg_stops" ] ||
+  fail "expected the build argument stop on $expected_build_arg_stops fixtures, not $build_arg_stops"
 
 echo "reduce-record: all $n checks pass"
