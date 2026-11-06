@@ -59,8 +59,14 @@ type descriptor struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
-// digestSyntax is the digest grammar of the OCI image specification.
-var digestSyntax = regexp.MustCompile(`^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[a-zA-Z0-9=_-]+$`)
+// digestSyntax and algorithmSyntax are the digest grammar of the OCI image
+// specification and its algorithm part.
+var (
+	digestSyntax    = regexp.MustCompile(`^` + algorithmGrammar + `:[a-zA-Z0-9=_-]+$`)
+	algorithmSyntax = regexp.MustCompile(`^` + algorithmGrammar + `$`)
+)
+
+const algorithmGrammar = `[a-z0-9]+(?:[+._-][a-z0-9]+)*`
 
 // provenanceState says whether a record's builds came from its provenance,
 // and why it has none when they did not, so that a report can say what to
