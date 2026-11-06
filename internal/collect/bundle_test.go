@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func TestOpenRegular(t *testing.T) {
@@ -151,6 +152,12 @@ func TestReadArchiveGzip(t *testing.T) {
 		{"concatenated members", concatenated, nil, nil},
 		{"empty", nil, nil, isMalformed},
 		{"not gzip", []byte("this is not gzip data"), nil, isMalformed},
+		{"zstd frame", []byte{0x28, 0xb5, 0x2f, 0xfd, 0x24, 0x00, 0x01, 0x00, 0x00}, nil, isUnsupported},
+		{"zstd skippable frame first", []byte{0x50, 0x2a, 0x4d, 0x18, 0x00, 0x00, 0x00, 0x00}, nil, isUnsupported},
+		{"zstd last skippable magic", []byte{0x5f, 0x2a, 0x4d, 0x18, 0x00, 0x00, 0x00, 0x00}, nil, isUnsupported},
+		{"before the skippable magics", []byte{0x4f, 0x2a, 0x4d, 0x18, 0x00, 0x00, 0x00, 0x00}, nil, isMalformed},
+		{"after the skippable magics", []byte{0x60, 0x2a, 0x4d, 0x18, 0x00, 0x00, 0x00, 0x00}, nil, isMalformed},
+		{"zstd magic cut short", []byte{0x28, 0xb5, 0x2f}, nil, isMalformed},
 		{"truncated", valid[:len(valid)/2], nil, isMalformed},
 		{"bad CRC", badCRC, nil, isMalformed},
 		{"trailing garbage", append(bytes.Clone(valid), "garbage"...), nil, isMalformed},
@@ -184,15 +191,20 @@ func TestReadArchiveGzip(t *testing.T) {
 	}
 }
 
+// TestReadArchiveReadError reads two bytes of a gzip header, then fails
+// once, so the error is not repeated to the gzip reader.
+func TestReadArchiveReadError(t *testing.T) {
+	r := iotest.TimeoutReader(bytes.NewReader([]byte{0x1f, 0x8b}))
+	_, err := readArchive(t.Context(), r, testLimits())
+	if !isMalformed(err) || !errors.Is(err, iotest.ErrTimeout) {
+		t.Fatalf("readArchive() error = %v, want a malformed record that wraps %v", err, iotest.ErrTimeout)
+	}
+}
+
 func TestReadTarEntries(t *testing.T) {
 	blob := "blobs/sha256/" + hex64('a')
+	sha512Hex := hex64('a') + hex64('a')
 	oldSparse := append(rawHeader("index.json", tar.TypeGNUSparse, 0), tarEnd()...)
-	paxSparse := append(append(paxHeader(
-		"GNU.sparse.major", "0", "GNU.sparse.minor", "1",
-		"GNU.sparse.name", "index.json", "GNU.sparse.size", "2",
-		"GNU.sparse.numblocks", "1", "GNU.sparse.map", "0,2"),
-		rawHeader("index.json", tar.TypeReg, 2)...), pad("{}")...)
-	paxSparse = append(paxSparse, tarEnd()...)
 
 	tests := []struct {
 		name    string
@@ -208,7 +220,8 @@ func TestReadTarEntries(t *testing.T) {
 		{"FIFO", tarBytes(t, tarEntry{name: "index.json", typeflag: tar.TypeFifo}), isMalformed},
 		{"global PAX header", tarBytes(t, tarEntry{name: "global", typeflag: tar.TypeXGlobalHeader}), isMalformed},
 		{"old GNU sparse file", oldSparse, isMalformed},
-		{"PAX sparse file", paxSparse, isMalformed},
+		{"PAX sparse file", paxSparseFile("index.json"), isMalformed},
+		{"PAX sparse file of another algorithm", paxSparseFile("blobs/sha512/" + sha512Hex), isMalformed},
 		{"duplicate file", tarBytes(t, regular("index.json", []byte("{}")), regular("index.json", []byte("{}"))), isMalformed},
 		{"duplicate directory", tarBytes(t, dir("blobs/"), dir("blobs/")), isMalformed},
 		{"not tar", []byte("this is not a tar archive at all, and it is long enough to fill a header block"), isMalformed},
@@ -217,9 +230,11 @@ func TestReadTarEntries(t *testing.T) {
 		{"truncated inside a status stream", tarBytes(t, regular(blob, concat(vertices(update{digest: "sha256:a"}), frame(pbBytes(nil, 3, make([]byte, 2000))))))[:1024], isArchiveDamage},
 	}
 	for _, name := range []string{
-		"./index.json", "/index.json", "other.txt", "blobs/sha512/" + hex64('a'),
+		"./index.json", "/index.json", "other.txt",
 		"blobs/sha256/" + hex64('a')[:63], "blobs/sha256/" + hex64('a') + "a", "blobs/sha256/" + hex64('A'),
 		"blobs/sha256/" + hex64('g'), "blobs/sha256/../index.json",
+		"blobs/SHA512/" + sha512Hex, "blobs//" + sha512Hex, "blobs/sha512/../index.json",
+		"blobs/sha512/a/" + sha512Hex, "blobs/sha512/a:b",
 	} {
 		tests = append(tests, struct {
 			name    string
@@ -227,14 +242,44 @@ func TestReadTarEntries(t *testing.T) {
 			wantErr func(error) bool
 		}{"name " + name, tarBytes(t, regular(name, []byte("x"))), isMalformed})
 	}
-	for _, d := range []string{"blobs", "index.json", "blobs/sha256", "other/"} {
+	for _, name := range []string{"blobs/sha512/" + sha512Hex, "blobs/sha512/" + hex64('a'), "blobs/blake3/" + hex64('a'), "blobs/sha256+b64u/LCa0a2j_xo_5m0U8HTBBNBNCLXBkg7-g-YpeiGJm564"} {
+		tests = append(tests, struct {
+			name    string
+			data    []byte
+			wantErr func(error) bool
+		}{"other algorithm " + name, tarBytes(t, regular(name, []byte("x"))), isUnsupported})
+	}
+	for _, d := range []string{"blobs/sha512/", "blobs/blake3/"} {
+		tests = append(tests, struct {
+			name    string
+			data    []byte
+			wantErr func(error) bool
+		}{"other algorithm directory " + d, tarBytes(t, dir(d)), isUnsupported})
+	}
+	tests = append(tests, struct {
+		name    string
+		data    []byte
+		wantErr func(error) bool
+	}{"other algorithm layout", tarBytes(t, dir("blobs/"), dir("blobs/sha512/"), regular("blobs/sha512/"+sha512Hex, []byte("x")), regular("index.json", []byte("{}"))), isUnsupported})
+	for _, e := range []tarEntry{
+		{name: "blobs/sha512/" + sha512Hex, typeflag: tar.TypeSymlink, linkname: "/etc/passwd"},
+		{name: "blobs/sha512/" + sha512Hex + "/", typeflag: tar.TypeDir},
+		{name: "blobs/sha512/" + sha512Hex, typeflag: tar.TypeFifo},
+	} {
+		tests = append(tests, struct {
+			name    string
+			data    []byte
+			wantErr func(error) bool
+		}{"other algorithm, wrong type " + e.name, tarBytes(t, e), isMalformed})
+	}
+	for _, d := range []string{"blobs", "index.json", "blobs/sha256", "blobs/sha512", "blobs/SHA512/", "other/"} {
 		tests = append(tests, struct {
 			name    string
 			data    []byte
 			wantErr func(error) bool
 		}{"directory " + d, tarBytes(t, dir(d)), isMalformed})
 	}
-	for _, f := range []string{"blobs/", "blobs/sha256/", "index.json/", "blobs/sha256/" + hex64('a') + "/"} {
+	for _, f := range []string{"blobs/", "blobs/sha256/", "index.json/", "blobs/sha256/" + hex64('a') + "/", "blobs/sha512/", "blobs/sha512/" + hex64('a') + "/"} {
 		data := append(rawHeader(f, tar.TypeReg, 0), tarEnd()...)
 		tests = append(tests, struct {
 			name    string
@@ -359,6 +404,8 @@ func FuzzReadArchive(f *testing.F) {
 		f.Add(gunzip(f, readFile(f, p)))
 	}
 	f.Add(tarBytes(f, dir("blobs/"), regular("index.json", []byte("{}"))))
+	f.Add(tarBytes(f, dir("blobs/"), dir("blobs/sha512/"), regular("blobs/sha512/"+hex64('a')+hex64('a'), []byte("x"))))
+	f.Add(paxSparseFile("blobs/sha512/" + hex64('a') + hex64('a')))
 	lim := testLimits()
 	lim.entries = 16
 	lim.decompressedBytes = 1 << 20
@@ -401,7 +448,51 @@ func FuzzReadArchive(f *testing.F) {
 	})
 }
 
+// FuzzReadCompressed reads input as a compressed archive. Zstandard input
+// must be unsupported, and input that is neither gzip nor Zstandard must be
+// malformed.
+func FuzzReadCompressed(f *testing.F) {
+	f.Add(readFile(f, fixturePaths(f)[0]))
+	f.Add(gzipBytes(f, tarBytes(f, dir("blobs/"), dir("blobs/sha512/"))))
+	f.Add([]byte{0x28, 0xb5, 0x2f, 0xfd, 0x24, 0x00, 0x01, 0x00, 0x00})
+	f.Add([]byte{0x5f, 0x2a, 0x4d, 0x18, 0x00, 0x00, 0x00, 0x00})
+	f.Add([]byte{0x1f, 0x8b})
+	gzipMagic := []byte{0x1f, 0x8b}
+	lim := testLimits()
+	lim.entries = 16
+	lim.decompressedBytes = 1 << 20
+	lim.jsonBytes = 64 << 10
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, err := readArchive(t.Context(), bytes.NewReader(data), lim)
+		switch {
+		case isZstd(data):
+			if !isUnsupported(err) {
+				t.Fatalf("readArchive() error = %v, want an unsupported record", err)
+			}
+		case !bytes.HasPrefix(data, gzipMagic):
+			if !isMalformed(err) {
+				t.Fatalf("readArchive() error = %v, want a malformed record", err)
+			}
+		case err != nil && !isTyped(err):
+			t.Fatalf("readArchive() error = %v, want a typed error", err)
+		}
+	})
+}
+
+// paxSparseFile returns a tar archive holding one PAX sparse file in format
+// 0.1, which keeps its sparse map in the PAX records.
+func paxSparseFile(name string) []byte {
+	b := append(append(paxHeader(
+		"GNU.sparse.major", "0", "GNU.sparse.minor", "1",
+		"GNU.sparse.name", name, "GNU.sparse.size", "2",
+		"GNU.sparse.numblocks", "1", "GNU.sparse.map", "0,2"),
+		rawHeader(name, tar.TypeReg, 2)...), pad("{}")...)
+	return append(b, tarEnd()...)
+}
+
 func isMalformed(err error) bool { return errors.Is(err, ErrMalformedRecord) }
+
+func isUnsupported(err error) bool { return errors.Is(err, ErrUnsupportedRecord) }
 
 // isArchiveDamage reports an archive that cannot be read, as opposed to a
 // blob that is not of the kind its descriptor says.

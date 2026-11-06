@@ -2,8 +2,10 @@ package collect
 
 import (
 	"archive/tar"
+	"bufio"
 	"compress/gzip"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -147,7 +149,15 @@ func readArchive(ctx context.Context, r io.Reader, lim limits) (*layout, error) 
 	compressed := &io.LimitedReader{R: r, N: lim.compressedBytes + 1}
 	decompressed := &io.LimitedReader{N: lim.decompressedBytes + 1}
 	l, err := func() (*layout, error) {
-		zr, err := gzip.NewReader(compressed)
+		br := bufio.NewReader(compressed)
+		magic, err := br.Peek(4)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, archiveError(err)
+		}
+		if isZstd(magic) {
+			return nil, unsupported("archive compression")
+		}
+		zr, err := gzip.NewReader(br)
 		if err != nil {
 			return nil, archiveError(err)
 		}
@@ -204,6 +214,9 @@ func readTar(ctx context.Context, r io.Reader, lim limits) (*layout, error) {
 		}
 		seen[hdr.Name] = true
 		if !allowedEntry(hdr) {
+			if otherAlgorithmEntry(hdr) {
+				return nil, unsupported("digest algorithm")
+			}
 			return nil, malformed("archive has an entry that is not part of a build record")
 		}
 		if hdr.Typeflag == tar.TypeDir {
@@ -242,10 +255,8 @@ func isSHA256Hex(s string) bool { return sha256Hex.MatchString(s) }
 // that buildx writes. Links, devices, sparse files and global headers are
 // never part of one.
 func allowedEntry(hdr *tar.Header) bool {
-	for key := range hdr.PAXRecords {
-		if strings.HasPrefix(key, "GNU.sparse.") {
-			return false
-		}
+	if isSparse(hdr) {
+		return false
 	}
 	switch hdr.Typeflag {
 	case tar.TypeDir:
@@ -256,6 +267,50 @@ func allowedEntry(hdr *tar.Header) bool {
 	default:
 		return false
 	}
+}
+
+// otherAlgorithmEntry reports whether hdr is the directory or a blob of a
+// digest algorithm other than SHA-256, which an OCI layout may hold and
+// Ichnos does not read.
+func otherAlgorithmEntry(hdr *tar.Header) bool {
+	rest, ok := strings.CutPrefix(hdr.Name, "blobs/")
+	if !ok || isSparse(hdr) {
+		return false
+	}
+	alg, encoded, ok := strings.Cut(rest, "/")
+	if !ok || alg == "sha256" {
+		return false
+	}
+	switch hdr.Typeflag {
+	case tar.TypeDir:
+		return encoded == "" && algorithmSyntax.MatchString(alg)
+	case tar.TypeReg:
+		return digestSyntax.MatchString(alg + ":" + encoded)
+	default:
+		return false
+	}
+}
+
+// isSparse reports whether hdr is a PAX sparse file, which Go's tar reader
+// presents as a regular file.
+func isSparse(hdr *tar.Header) bool {
+	for key := range hdr.PAXRecords {
+		if strings.HasPrefix(key, "GNU.sparse.") {
+			return true
+		}
+	}
+	return false
+}
+
+// isZstd reports whether b starts with the magic number of a Zstandard
+// frame or of a skippable frame, either of which can start a Zstandard
+// stream (RFC 8878, sections 3.1.1 and 3.1.2).
+func isZstd(b []byte) bool {
+	if len(b) < 4 {
+		return false
+	}
+	magic := binary.LittleEndian.Uint32(b)
+	return magic == 0xFD2FB528 || magic&^0xF == 0x184D2A50
 }
 
 // archiveError wraps an error from the gzip or tar reader. Their messages
