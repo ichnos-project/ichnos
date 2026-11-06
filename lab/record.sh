@@ -1,12 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Every git and docker command uses the lab's own configuration, and docker the
-# default socket.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT \
-  BUILDX_CONFIG DOCKER_CONTEXT DOCKER_HOST
-# buildx would otherwise fetch registry tokens itself, on this machine, and
-# export that request, with this machine's network address, into the record.
-export BUILDKIT_NO_CLIENT_TOKEN=true
 
 buildkit_version=v0.34.0
 buildkit_image="moby/buildkit:$buildkit_version@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c"
@@ -48,36 +41,12 @@ known() {
   return 1
 }
 
-for name in "$@"; do
-  if ! known "$name"; then
-    echo "$name: no such scenario" >&2
-    exit 1
-  fi
-done
-if [ "$#" -eq 0 ]; then
-  selection=all
-else
-  selection=" $* "
-fi
-
-mkdir "$work"
-trap 'rm -rf "$work"' EXIT
-
-# The lab logs in to no registry, so it uses a Docker configuration of its own,
-# which keeps the user's credential store and settings out of every build. It
-# keeps where the user's CLI plugins are, because buildx is one. A configuration
-# with no auths entry makes the CLI fall back to the platform's credential
-# store, such as the macOS keychain, so it gets one for a host that cannot
-# exist.
-user_config=${DOCKER_CONFIG:-$HOME/.docker}
-mkdir "$work/docker"
-ln -s "$user_config/cli-plugins" "$work/docker/cli-plugins"
-if [ -f "$user_config/config.json" ]; then
-  jq '{cliPluginsExtraDirs}' "$user_config/config.json"
-else
-  echo '{}'
-fi | jq '. + {auths: {"ichnos-lab.invalid": {}}}' >"$work/docker/config.json"
-export DOCKER_CONFIG="$work/docker"
+# parse_addresses prints the addresses in the output of ip addr or ifconfig on
+# its input, other than loopback.
+parse_addresses() {
+  awk '{ for (i = 1; i < NF; i++) if ($i == "inet" || $i == "inet6") print $(i + 1) }' |
+    sed 's|/.*||; s|%.*||' | grep -v -x -E '127\..*|::1' || true
+}
 
 # host_addresses prints this machine's network addresses, other than loopback.
 host_addresses() {
@@ -85,18 +54,8 @@ host_addresses() {
     ip addr show
   else
     ifconfig
-  fi | awk '{ for (i = 1; i < NF; i++) if ($i == "inet" || $i == "inet6") print $(i + 1) }' |
-    sed 's|/.*||; s|%.*||' | grep -v -x -E '127\..*|::1' || true
+  fi | parse_addresses
 }
-
-# A record must not hold the local user name, host name, macOS temporary path
-# or any network address of this machine.
-host_addresses >"$work/private.txt"
-if [ ! -s "$work/private.txt" ]; then
-  echo "found no network address of this machine to check records against" >&2
-  exit 1
-fi
-printf '%s\n' "$(id -un)" "$(hostname -s)" /var/folders >>"$work/private.txt"
 
 context_files() {
   local dir=$1 app_text=$2
@@ -270,20 +229,129 @@ record_pair() {
   fi
 }
 
-# The builder's metadata is in the lab's own configuration, so buildx would
-# start a builder container left by an earlier run as if it were new.
-if docker container inspect "buildx_buildkit_${builder}0" >/dev/null 2>&1; then
-  echo "buildx_buildkit_${builder}0 is left from an earlier run: remove it first" >&2
-  exit 1
-fi
+# isolate_environment makes every git and docker command use the lab's own
+# configuration, and docker the default socket. buildx would otherwise fetch
+# registry tokens itself, on this machine, and export that request, with this
+# machine's network address, into the record.
+isolate_environment() {
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT \
+    BUILDX_CONFIG DOCKER_CONTEXT DOCKER_HOST
+  export BUILDKIT_NO_CLIENT_TOKEN=true
+}
+
+# select_scenarios stops the run unless every name it is given is a scenario,
+# and selects those scenarios, or every one when it is given none.
+select_scenarios() {
+  local name
+
+  for name in "$@"; do
+    if ! known "$name"; then
+      echo "$name: no such scenario" >&2
+      exit 1
+    fi
+  done
+  if [ "$#" -eq 0 ]; then
+    selection=all
+  else
+    selection=" $* "
+  fi
+}
+
+# docker_config writes the lab's own Docker configuration into dir, from the
+# user's configuration directory. The lab logs in to no registry, so the
+# configuration keeps the user's credential store and settings out of every
+# build. It keeps where the user's CLI plugins are, because buildx is one. A
+# configuration with no auths entry makes the CLI fall back to the platform's
+# credential store, such as the macOS keychain, so it gets one for a host that
+# cannot exist.
+docker_config() {
+  local user_config=$1 dir=$2
+
+  mkdir "$dir"
+  ln -s "$user_config/cli-plugins" "$dir/cli-plugins"
+  if [ -f "$user_config/config.json" ]; then
+    jq '{cliPluginsExtraDirs}' "$user_config/config.json"
+  else
+    echo '{}'
+  fi | jq '. + {auths: {"ichnos-lab.invalid": {}}}' >"$dir/config.json"
+}
+
+# private_values writes what a record must not hold to $work/private.txt: this
+# machine's network addresses other than loopback, the local user name, the host
+# name and the macOS temporary path. It stops the run if it finds no address.
+private_values() {
+  host_addresses >"$work/private.txt"
+  if [ ! -s "$work/private.txt" ]; then
+    echo "found no network address of this machine to check records against" >&2
+    exit 1
+  fi
+  printf '%s\n' "$(id -un)" "$(hostname -s)" /var/folders >>"$work/private.txt"
+}
+
+# check_no_builder stops the run if a builder container is left from an earlier
+# run. The builder's metadata is in the lab's own configuration, so buildx would
+# start that container as if it were new.
+check_no_builder() {
+  if docker container inspect "buildx_buildkit_${builder}0" >/dev/null 2>&1; then
+    echo "buildx_buildkit_${builder}0 is left from an earlier run: remove it first" >&2
+    exit 1
+  fi
+}
+
+# allowed_addresses writes the addresses that a connection in a trace may start
+# from to $work/allowed.txt: loopback and the builder's own.
+allowed_addresses() {
+  {
+    printf '%s\n' 127.0.0.1 ::1
+    docker container inspect --format '{{range .NetworkSettings.Networks}}{{println .IPAddress}}{{end}}' "buildx_buildkit_${builder}0"
+  } >"$work/allowed.txt"
+}
+
+# replace_records moves the run's records into testdata: all of them when no
+# scenario is named, and otherwise only the named ones, so that the other
+# records stay as they are. It stops, replacing nothing, if a named scenario
+# recorded nothing.
+replace_records() {
+  local name
+
+  if [ "$selection" = all ]; then
+    rm -rf "${out:?}"
+    mkdir -p "$(dirname "$out")"
+    mv "$records" "$out"
+    return 0
+  fi
+  for name in "$@"; do
+    if [ ! -d "$records/$name" ]; then
+      echo "$name: recorded nothing" >&2
+      exit 1
+    fi
+  done
+  mkdir -p "$out"
+  for name in "$@"; do
+    if [ -d "$records/$name" ]; then
+      rm -rf "${out:?}/$name"
+      mv "$records/$name" "$out/$name"
+    fi
+  done
+}
+
+# A shell that sources this file, as lab/record-test.sh does, gets the
+# functions above and runs nothing below.
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
+
+isolate_environment
+select_scenarios "$@"
+mkdir "$work"
+trap 'rm -rf "$work"' EXIT
+docker_config "${DOCKER_CONFIG:-$HOME/.docker}" "$work/docker"
+export DOCKER_CONFIG="$work/docker"
+private_values
+check_no_builder
 docker buildx create --name "$builder" --driver docker-container \
   --driver-opt "image=$buildkit_image" unix:///var/run/docker.sock >/dev/null
 trap 'docker rm --force "$assets" "$registry" "$locked_registry" >/dev/null 2>&1 || true; docker buildx rm "$builder" >/dev/null 2>&1 || true; rm -rf "$work"' EXIT
 docker buildx inspect --bootstrap "$builder" >/dev/null
-{
-  printf '%s\n' 127.0.0.1 ::1
-  docker container inspect --format '{{range .NetworkSettings.Networks}}{{println .IPAddress}}{{end}}' "buildx_buildkit_${builder}0"
-} >"$work/allowed.txt"
+allowed_addresses
 # The web server and registries join the builder's network namespace and listen
 # on its loopback only, so nothing but the builder can reach them. A missing
 # htpasswd file is created with a random password, which the registry logs, and
@@ -590,22 +658,4 @@ printf 'two\n' >"$work/cache-mount-from/pr/seed/app/app.txt"
 record cache-mount-from base --build-context "seed=$work/cache-mount-from/base/seed" "${export_cache[@]}"
 record cache-mount-from pr --build-context "seed=$work/cache-mount-from/pr/seed" "${import_cache[@]}"
 
-if [ "$selection" = all ]; then
-  rm -rf "$out"
-  mkdir -p "$(dirname "$out")"
-  mv "$records" "$out"
-  exit 0
-fi
-for name in "$@"; do
-  if [ ! -d "$records/$name" ]; then
-    echo "$name: recorded nothing" >&2
-    exit 1
-  fi
-done
-mkdir -p "$out"
-for name in "$@"; do
-  if [ -d "$records/$name" ]; then
-    rm -rf "${out:?}/$name"
-    mv "$records/$name" "$out/$name"
-  fi
-done
+replace_records "$@"
