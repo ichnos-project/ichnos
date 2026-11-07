@@ -4,6 +4,7 @@ test:
 	go test -race ./...
 	hack/check-pr-title-test.sh
 	lab/gha/reduce-record-test.sh
+	lab/record-test.sh
 
 fuzz:
 	go test -run '^$$' -fuzz '^FuzzReadArchive$$' -fuzztime 50000x ./internal/collect

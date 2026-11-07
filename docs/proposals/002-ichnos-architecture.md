@@ -185,7 +185,7 @@ The explanation follows the shape of BuildBuddy's `bb explain`: each step is bas
 
 1. **Check whether the cache arrived**, and report it for every build, whatever else the analysis finds: each import, whether it failed, and the `no-cache` setting.
 2. **Align steps** between the base and pull request builds, one platform at a time, by Dockerfile text and operation type, in Dockerfile order. A platform in only one build is reported as not compared. Text that appears once in both builds anchors the match, and the longest run of anchors in the same order is kept. An anchor left out of that run moved, and stays paired with its base step. Between anchors, equal lines at each end match, and the remaining lines pair in order with lines of the same instruction keyword as modified steps. A line still without a partner is PR-only or base-only.
-3. **Mark expected misses.** A miss is expected when any field of the step's definition or its materials changed, when the step is PR-only, when its ancestor fingerprint changed, when a `COPY` or `ADD` source appears in the diff between the two built commits (after `.dockerignore`) or has a changed content fingerprint, when the changed `.dockerignore` patterns can affect its sources, or when it descends from another expected miss. Paths match using the build context directory and BuildKit's wildcard rules.
+3. **Mark expected misses.** A miss is expected when any field of the step's definition or its materials changed, when the step is PR-only, when its ancestor fingerprint changed, when a `COPY` or `ADD` source, or a source mounted into a `RUN` step, appears in the diff between the two built commits (after `.dockerignore` for a local context: the [scenario lab](../../lab/README.md#cache-behavior) found that BuildKit applies none to a Git context) or has a changed content fingerprint, when the changed `.dockerignore` patterns can affect its sources, or when it descends from another expected miss. Paths match using the build context directory and BuildKit's wildcard rules.
 4. **Report the first miss that nothing explains**, and fold the misses that cascade from it into one line. An image source never reports a hit, so an unchanged one is not a miss.
 5. **Classify the cause**, using the first row that matches:
 
@@ -198,7 +198,7 @@ The explanation follows the shape of BuildBuddy's `bb explain`: each step is bas
 | A cache import is recorded, and no step hit | `cache-not-used` |
 | The step has a withheld input | `unknown` |
 | The step has no build context or remote source ancestor | `incomplete-cache` |
-| The diff clears the step's copied sources | `incomplete-cache` |
+| The diff clears the step's copied and mounted sources | `incomplete-cache` |
 | Anything else | `unknown` |
 
 CI configuration and the CI API can narrow `incomplete-cache` and `cache-not-used` to `scope-mismatch`, `min-mode` or `readonly-trigger`, and snapshots can show `cold-builder` and `builder-version`. An empty `type=local` import leaves no trace in the record, so only CI configuration can tell it from no import. `nondeterministic-input` waits for the repeat-build mode in Future Milestones.
